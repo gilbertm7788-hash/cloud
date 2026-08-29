@@ -1,0 +1,10 @@
+name = "g2b-relay"
+main = "relay.js"
+compatibility_date = "2026-08-01"
+
+# 배포 절차 (docs/setup-worker-relay.md):
+#   npx wrangler login
+#   npx wrangler secret put RELAY_SECRET   # 긴 랜덤 문자열 입력
+#   npx wrangler deploy
+# 출력된 https://g2b-relay.<account>.workers.dev 를
+# GitHub Secrets의 G2B_RELAY_URL로, RELAY_SECRET 값을 G2B_RELAY_SECRET으로 등록.

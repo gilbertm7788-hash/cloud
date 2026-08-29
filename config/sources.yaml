@@ -1,0 +1,254 @@
+# =============================================================================
+# 콘텐츠 소스 선언 — 코드 수정 없이 이 파일만으로 소스 추가/제거/조정
+# 새 소스를 켜기 전에 반드시 `python -m src.main verify-sources`로 확인할 것.
+# =============================================================================
+
+defaults:
+  timeout: 20
+  max_new_per_run: 10
+
+site:
+  # GitHub Pages 주소 (저장소 공개 + Pages 활성화 후 실제 주소로 교체)
+  base_url: "https://gilbertm7788-hash.github.io/cloud"
+  title: "건설 인사이트"
+  description: "건설·토목·건축 뉴스, 입찰공고, 위원회 모집 큐레이션 아카이브"
+  # 공개 텔레그램 채널 개설 후 채워넣기 (예: https://t.me/xxxx). 비우면 버튼 미표시.
+  telegram_channel_url: ""
+
+sources:
+  # ---------------------------------------------------------------------------
+  # 📰 뉴스 RSS (Phase 1) — ND소프트 CMS 계열 표준 경로 /rss/allArticle.xml
+  # ---------------------------------------------------------------------------
+  - id: ikld
+    name: 국토일보
+    type: rss
+    category: news
+    slots: [morning, noon, evening]
+    rss:
+      url: "https://www.ikld.kr/rss/allArticle.xml"
+      id_pattern: "idxno=(\\d+)"
+    filters:
+      keyword_exclude: ["부고", "[인사]"]
+
+  - id: conslove
+    name: 한국건설신문
+    type: rss
+    category: news
+    slots: [morning, evening]
+    rss:
+      url: "http://www.conslove.co.kr/rss/allArticle.xml"
+      id_pattern: "idxno=(\\d+)"
+
+  - id: engdaily
+    name: 엔지니어링데일리
+    type: rss
+    category: news
+    slots: [morning, noon, evening]
+    rss:
+      url: "https://www.engdaily.com/rss/allArticle.xml"
+      id_pattern: "idxno=(\\d+)"
+
+  - id: koscaj
+    name: 대한전문건설신문
+    type: rss
+    category: news
+    slots: [morning, evening]
+    rss:
+      url: "https://www.koscaj.com/rss/allArticle.xml"
+      id_pattern: "idxno=(\\d+)"
+
+  - id: constimes
+    name: 건설타임즈
+    type: rss
+    category: news
+    slots: [morning, evening]
+    rss:
+      url: "https://www.constimes.co.kr/rss/allArticle.xml"
+      id_pattern: "idxno=(\\d+)"
+
+  - id: molit
+    name: 국토교통부 보도자료
+    type: rss
+    category: gov
+    slots: [morning, evening]
+    rss:
+      url: "https://www.korea.kr/rss/dept_molit.xml"
+
+  # ---------------------------------------------------------------------------
+  # 🏛 협회·학회 게시판 (Phase 2) — 셀렉터는 verify-sources로 실측 후 조정
+  # ---------------------------------------------------------------------------
+  - id: ksce_external
+    name: 대한토목학회 대외기관공고
+    type: board
+    category: committee
+    slots: [morning, evening]
+    board:
+      list_url: "https://www.ksce.or.kr/not/Default.asp?gbn=10&ctop=MN0096&htop=MN0031&ptop=MN0031&page={page}"
+      pages: 1
+      encoding: auto           # 구형 ASP — 실측 시 euc-kr로 고정 가능
+      row_selector: "table tr:has(a)"
+      skip_rows: 0
+      url_base: "https://www.ksce.or.kr/not/"
+      id_pattern: "bidx=(\\d+)"
+      fields:
+        title: {selector: "a", attr: text}
+        link: {selector: "a", attr: href}
+    filters:
+      keyword_include: ["위원", "모집", "공모", "평가", "심의", "자문"]
+
+  - id: aik_news
+    name: 대한건축학회 건축계소식
+    type: board
+    category: committee
+    slots: [morning, evening]
+    board:
+      list_url: "https://www.aik.or.kr/board/board_list.jsp?ncode=d001&page={page}"
+      pages: 1
+      row_selector: "table tr:has(a)"
+      url_base: "https://www.aik.or.kr/board/"
+      id_pattern: "num=(\\d+)"
+      fields:
+        title: {selector: "a", attr: text}
+        link: {selector: "a", attr: href}
+    filters:
+      keyword_include: ["위원", "모집", "공모", "평가", "심의", "세미나", "심포지엄"]
+
+  - id: kira_news
+    name: 대한건축사협회 건축계소식
+    type: board
+    category: committee
+    slots: [morning, evening]
+    board:
+      list_url: "https://www.kira.or.kr/jsp/main/01/02.jsp"
+      pages: 1
+      row_selector: "table tr:has(a)"
+      url_base: "https://www.kira.or.kr/jsp/main/01/"
+      id_pattern: "ba_id=(\\d+)"
+      fields:
+        title: {selector: "a", attr: text}
+        link: {selector: "a", attr: href}
+    filters:
+      keyword_include: ["위원", "모집", "공모", "평가", "심의", "경관"]
+
+  - id: kpea_recom
+    name: 한국기술사회 전문가 위원추천
+    type: board
+    category: committee
+    enabled: false            # eGov .do 구조 — verify-sources 실측 후 셀렉터 확정하고 켤 것
+    slots: [morning]
+    board:
+      list_url: "https://www.kpea.or.kr/kpea/recom/RecomList.do?leftMenuCode=member&menu=08&sub=01"
+      pages: 1
+      row_selector: "table tr:has(a)"
+      url_base: "https://www.kpea.or.kr/kpea/recom/"
+      id_pattern: "(\\d+)"
+      fields:
+        title: {selector: "a", attr: text}
+        link: {selector: "a", attr: href}
+    filters:
+      keyword_include: ["위원", "모집", "추천"]
+
+  # ---------------------------------------------------------------------------
+  # 👥 위원회 모집 (Phase 4)
+  # ---------------------------------------------------------------------------
+  - id: calspia_turnkey
+    name: 건설사업정보시스템 심의위원 모집공고
+    type: board
+    category: committee
+    enabled: false            # POST 파라미터 실측 필요 — verify-sources 후 활성화
+    slots: [morning]
+    board:
+      list_url: "https://www.calspia.go.kr/portal/turnkey/selectDlbMocRcrPanMng.do"
+      method: POST
+      form_data: {pageIndex: "{page}"}
+      pages: 1
+      row_selector: "table tr:has(a)"
+      url_base: "https://www.calspia.go.kr/portal/turnkey/"
+      id_pattern: "(\\d+)"
+      fields:
+        title: {selector: "a", attr: text}
+        link: {selector: "a", attr: href}
+
+  - id: lh_notice
+    name: LH 공지사항
+    type: board
+    category: committee
+    enabled: false            # board.es 구조 실측 필요
+    slots: [morning]
+    board:
+      list_url: "https://www.lh.or.kr/board.es?mid=a10501010000&bid=0033&nPage={page}"
+      pages: 1
+      row_selector: "table tr:has(a)"
+      url_base: "https://www.lh.or.kr/"
+      id_pattern: "list_no=(\\d+)"
+      fields:
+        title: {selector: "a", attr: text}
+        link: {selector: "a", attr: href}
+    filters:
+      keyword_include: ["위원", "모집", "평가", "심의", "자문"]
+
+  # 새올 표준 게시판 — host만 바꿔 기초지자체 추가 (아래는 예시, 실측 후 활성화)
+  - id: eminwon_gijang
+    name: 부산 기장군 고시공고
+    type: eminwon
+    category: committee
+    enabled: false
+    slots: [morning]
+    eminwon:
+      host: eminwon.gijang.go.kr
+      se_codes: ["01", "02"]
+    filters:
+      keyword_include: ["심의위원", "평가위원", "기술자문", "위원 공개모집", "위원 모집"]
+
+  # ---------------------------------------------------------------------------
+  # 📋 나라장터 입찰공고 (Phase 3) — DATA_GO_KR_KEY 시크릿 필요
+  # ---------------------------------------------------------------------------
+  - id: g2b_construction
+    name: 나라장터 공사 입찰공고
+    type: narajangteo
+    category: bid
+    slots: [morning, evening]
+    max_new_per_run: 8
+    narajangteo:
+      operation: getBidPblancListInfoCnstwkPPSSrch
+      extra_params: {}
+    filters:
+      keyword_exclude: []
+
+  - id: g2b_engineering
+    name: 나라장터 건설엔지니어링 용역
+    type: narajangteo
+    category: bid
+    slots: [morning, evening]
+    max_new_per_run: 8
+    narajangteo:
+      operation: getBidPblancListInfoServcPPSSrch
+      extra_params: {}
+    filters:
+      keyword_include: ["설계", "감리", "건설사업관리", "안전진단", "타당성", "실시설계", "기본설계"]
+
+  # ---------------------------------------------------------------------------
+  # 🎬 유튜브 (Phase 5) — 채널 RSS는 API 키 불필요. channel_id(UC...)를 채워 활성화
+  # ---------------------------------------------------------------------------
+  - id: yt_seed_1
+    name: 유튜브 시드 채널 1
+    type: youtube_rss
+    category: youtube
+    enabled: false            # channel_id 확보 후 활성화 (docs/setup-youtube.md 참조)
+    slots: [noon]
+    youtube:
+      channel_id: "UCxxxxxxxxxxxxxxxxxxxxxx"
+
+  # ---------------------------------------------------------------------------
+  # 📰 네이버 뉴스 API (Phase 8) — 대한경제 등 RSS 없는 제휴 매체 보완
+  # ---------------------------------------------------------------------------
+  - id: naver_construction
+    name: 네이버 뉴스 (건설 키워드)
+    type: naver_news
+    category: news
+    enabled: false            # NAVER_CLIENT_ID/SECRET 시크릿 등록 후 활성화
+    slots: [noon]
+    naver_news:
+      query: "건설 입찰 OR 토목 OR 건축"
+      display: 50
+      domain_include: ["dnews.co.kr"]

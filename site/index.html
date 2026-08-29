@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>건설 인사이트 — 건설 뉴스·입찰·위원회 모집 아카이브</title>
+<meta name="description" content="건설·토목·건축 뉴스, 진행중 입찰공고, 위원회 모집 공고를 한 곳에서. 매일 자동 업데이트.">
+<link rel="stylesheet" href="style.css">
+<link rel="alternate" type="application/rss+xml" title="건설 인사이트" href="feed.xml">
+</head>
+<body>
+<header>
+  <div class="site-head">
+    <h1 id="site-title">건설 인사이트</h1>
+    <p id="site-desc">건설·토목·건축 뉴스, 입찰공고, 위원회 모집 큐레이션</p>
+    <a id="tg-link" class="tg-cta" href="#" hidden>📱 텔레그램 채널</a>
+  </div>
+</header>
+<main>
+  <div class="tabs" role="tablist">
+    <button data-tab="committees" class="active">👥 진행중 위원회 모집</button>
+    <button data-tab="bids">📋 진행중 입찰</button>
+    <button data-tab="news">📰 뉴스</button>
+    <button data-tab="videos">🎬 영상</button>
+    <button onclick="location.href='posts/'" type="button">📚 일간 브리핑</button>
+  </div>
+  <div class="toolbar">
+    <input id="search" type="search" placeholder="제목·기관 검색">
+    <select id="source-filter" hidden></select>
+  </div>
+  <div id="content"><p class="empty">불러오는 중…</p></div>
+</main>
+<footer>
+  <p>공개된 뉴스·공고를 자동 수집해 정리한 아카이브입니다. 항목의 정확한 내용·마감일은 반드시 출처(원문)에서 확인하세요.</p>
+  <p id="generated-at"></p>
+</footer>
+<script>
+(function () {
+  "use strict";
+  var DATA = null;
+  var state = { tab: "committees", query: "", source: "" };
+
+  function esc(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function dday(row) {
+    if (row.deadline == null) return '<span class="badge warn">마감 확인 필요</span>';
+    var d = row.d_day;
+    if (d === 0) return '<span class="badge due">오늘 마감</span>';
+    if (d <= 3) return '<span class="badge due">D-' + d + "</span>";
+    return '<span class="badge">D-' + d + " · " + esc(row.deadline) + "</span>";
+  }
+
+  function matches(row) {
+    if (state.source && row.source !== state.source) return false;
+    if (!state.query) return true;
+    var q = state.query.toLowerCase();
+    return ((row.title || "") + " " + (row.org || "") + " " + (row.source || ""))
+      .toLowerCase().indexOf(q) !== -1;
+  }
+
+  function renderCards(rows, opts) {
+    opts = opts || {};
+    var out = [];
+    rows.forEach(function (r) {
+      if (!matches(r)) return;
+      var meta = [];
+      if (opts.deadline) meta.push(dday(r));
+      if (r.org) meta.push("🏢 " + esc(r.org));
+      if (r.amount) meta.push("💰 " + esc(r.amount));
+      if (!r.org && r.source) meta.push(esc(r.source));
+      meta.push(esc(r.date));
+      out.push(
+        '<div class="card"><div class="title"><a href="' + esc(r.url) +
+        '" target="_blank" rel="noopener">' + esc(r.title) + "</a></div>" +
+        '<div class="meta">' + meta.join(" ") + "</div></div>"
+      );
+    });
+    return out.length ? out.join("") : '<p class="empty">표시할 항목이 없습니다.</p>';
+  }
+
+  function renderNews(rows) {
+    var byDate = {};
+    var order = [];
+    rows.forEach(function (r) {
+      if (!matches(r)) return;
+      if (!byDate[r.date]) { byDate[r.date] = []; order.push(r.date); }
+      byDate[r.date].push(r);
+    });
+    if (!order.length) return '<p class="empty">표시할 항목이 없습니다.</p>';
+    return order.map(function (d) {
+      var cards = byDate[d].map(function (r) {
+        return '<div class="card"><div class="title"><a href="' + esc(r.url) +
+          '" target="_blank" rel="noopener">' + esc(r.title) + "</a></div>" +
+          '<div class="meta">' + esc(r.source) + "</div></div>";
+      }).join("");
+      return '<div class="day-group"><h3>' + esc(d) + "</h3>" + cards + "</div>";
+    }).join("");
+  }
+
+  function renderVideos(rows) {
+    var out = [];
+    rows.forEach(function (r) {
+      if (!matches(r)) return;
+      var thumb = r.thumbnail
+        ? '<img loading="lazy" src="' + esc(r.thumbnail) + '" alt="">'
+        : "";
+      out.push(
+        '<a class="video-card card" href="' + esc(r.url) +
+        '" target="_blank" rel="noopener">' + thumb +
+        '<div class="title">' + esc(r.title) + "</div>" +
+        '<div class="meta">' + esc(r.channel || r.source) + "</div></a>"
+      );
+    });
+    return out.length
+      ? '<div class="videos">' + out.join("") + "</div>"
+      : '<p class="empty">표시할 항목이 없습니다.</p>';
+  }
+
+  function currentRows() {
+    if (!DATA) return [];
+    return DATA[state.tab] || [];
+  }
+
+  function updateSourceFilter() {
+    var sel = document.getElementById("source-filter");
+    var rows = currentRows();
+    var sources = [];
+    rows.forEach(function (r) {
+      if (r.source && sources.indexOf(r.source) === -1) sources.push(r.source);
+    });
+    if (state.tab === "news" && sources.length > 1) {
+      sel.hidden = false;
+      sel.innerHTML = '<option value="">전체 출처</option>' + sources.map(function (s) {
+        return '<option value="' + esc(s) + '"' +
+          (state.source === s ? " selected" : "") + ">" + esc(s) + "</option>";
+      }).join("");
+    } else {
+      sel.hidden = true;
+      state.source = "";
+    }
+  }
+
+  function render() {
+    var el = document.getElementById("content");
+    if (!DATA) { el.innerHTML = '<p class="empty">데이터를 불러오지 못했습니다.</p>'; return; }
+    updateSourceFilter();
+    var rows = currentRows();
+    if (state.tab === "committees") el.innerHTML = renderCards(rows, { deadline: true });
+    else if (state.tab === "bids") el.innerHTML = renderCards(rows, { deadline: true });
+    else if (state.tab === "news") el.innerHTML = renderNews(rows);
+    else el.innerHTML = renderVideos(rows);
+  }
+
+  document.querySelectorAll(".tabs button[data-tab]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      state.tab = btn.getAttribute("data-tab");
+      state.source = "";
+      document.querySelectorAll(".tabs button[data-tab]").forEach(function (b) {
+        b.classList.toggle("active", b === btn);
+      });
+      render();
+    });
+  });
+  document.getElementById("search").addEventListener("input", function (e) {
+    state.query = e.target.value.trim();
+    render();
+  });
+  document.getElementById("source-filter").addEventListener("change", function (e) {
+    state.source = e.target.value;
+    render();
+  });
+
+  fetch("data.json", { cache: "no-store" })
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      DATA = data;
+      if (data.site) {
+        if (data.site.title) {
+          document.getElementById("site-title").textContent = data.site.title;
+          document.title = data.site.title + " — 건설 뉴스·입찰·위원회 모집 아카이브";
+        }
+        if (data.site.description)
+          document.getElementById("site-desc").textContent = data.site.description;
+        if (data.site.telegram) {
+          var tg = document.getElementById("tg-link");
+          tg.href = data.site.telegram;
+          tg.hidden = false;
+        }
+      }
+      if (data.generated_at)
+        document.getElementById("generated-at").textContent =
+          "마지막 업데이트: " + data.generated_at.slice(0, 16).replace("T", " ") + " KST";
+      render();
+    })
+    .catch(function () { DATA = null; render(); });
+})();
+</script>
+</body>
+</html>

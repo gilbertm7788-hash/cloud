@@ -1,0 +1,125 @@
+name: collect
+
+on:
+  schedule:
+    - cron: "30 22 * * *"   # 07:30 KST → morning
+    - cron: "0 3 * * *"     # 12:00 KST → noon
+    - cron: "30 9 * * *"    # 18:30 KST → evening
+  workflow_dispatch:
+    inputs:
+      command:
+        description: 실행할 커맨드
+        type: choice
+        default: collect
+        options: [collect, verify-sources, smoke-g2b, blog-draft, build-site]
+      sources:
+        description: 콤마 구분 소스 id 필터 (collect 전용, 비우면 전체)
+        required: false
+      dry_run:
+        description: dry-run (게시·상태 저장 없음)
+        type: boolean
+        default: false
+
+# 실행 직렬화 — 슬롯이 겹쳐도 대기시켜 중복 게시·state 충돌 방지
+concurrency:
+  group: collect-pipeline
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_STAGING_CHAT_ID: ${{ secrets.TELEGRAM_STAGING_CHAT_ID }}
+      TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+      DATA_GO_KR_KEY: ${{ secrets.DATA_GO_KR_KEY }}
+      G2B_RELAY_URL: ${{ secrets.G2B_RELAY_URL }}
+      G2B_RELAY_SECRET: ${{ secrets.G2B_RELAY_SECRET }}
+      NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+      NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+      YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -e ".[llm]"
+
+      - name: Run pipeline
+        env:
+          INPUT_SOURCES: ${{ inputs.sources }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+          INPUT_COMMAND: ${{ inputs.command }}
+          CRON_EXPR: ${{ github.event.schedule }}
+        run: |
+          CMD="${INPUT_COMMAND:-collect}"
+          ARGS=""
+          if [ "$CMD" = "collect" ]; then
+            # cron 지연으로 슬롯이 밀려 판정되지 않게, 발화한 cron에서 슬롯을 고정
+            case "$CRON_EXPR" in
+              "30 22 * * *") ARGS="$ARGS --slot morning" ;;
+              "0 3 * * *")   ARGS="$ARGS --slot noon" ;;
+              "30 9 * * *")  ARGS="$ARGS --slot evening" ;;
+            esac
+            [ -n "$INPUT_SOURCES" ] && ARGS="$ARGS --sources $INPUT_SOURCES"
+            [ "$INPUT_DRY_RUN" = "true" ] && ARGS="$ARGS --dry-run"
+          fi
+          python -m src.main "$CMD" $ARGS
+
+      # 파이프라인이 실패해도 이미 게시된 상태(seen.db)는 반드시 커밋 — 중복 게시 방지
+      - name: Commit state, drafts, site
+        if: ${{ !cancelled() && inputs.dry_run != true }}
+        run: |
+          git config user.name "collect-bot"
+          git config user.email "actions@users.noreply.github.com"
+          mkdir -p state drafts site
+          git add state drafts site
+          if git diff --cached --quiet; then
+            echo "변경 없음"
+            exit 0
+          fi
+          git commit -m "chore(state): $(date -u +%FT%TZ) [skip ci]"
+          pushed=0
+          for i in 1 2 3; do
+            if git push; then pushed=1; break; fi
+            git pull --rebase || exit 1
+            sleep 5
+          done
+          [ "$pushed" = 1 ] || { echo "git push 3회 실패 — state 유실 위험"; exit 1; }
+
+      - name: Upload Pages artifact
+        if: ${{ !cancelled() && inputs.dry_run != true }}
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        if: ${{ !cancelled() && inputs.dry_run != true }}
+        uses: actions/deploy-pages@v4
+        continue-on-error: true   # Pages 미설정 초기 상태에서도 수집은 계속 — 실패는 아래에서 알림
+
+      - name: Notify failure
+        if: ${{ failure() || steps.deploy.outcome == 'failure' }}
+        run: |
+          MSG="⚠️ collect 워크플로 실패"
+          [ "${{ steps.deploy.outcome }}" = "failure" ] && MSG="⚠️ Pages 배포 실패 (Settings→Pages→Source: GitHub Actions 설정 확인)"
+          if [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_STAGING_CHAT_ID" ]; then
+            curl -sS "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+              -d chat_id="${TELEGRAM_STAGING_CHAT_ID}" \
+              --data-urlencode text="${MSG}: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          fi

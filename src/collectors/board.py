@@ -1,0 +1,179 @@
+"""type: board — YAML 셀렉터로 선언되는 범용 HTML 게시판 크롤러.
+
+sources.yaml 예:
+    board:
+      list_url: "https://.../list.asp?page={page}"   # {page}는 1부터 치환, 없으면 단일 페이지
+      pages: 1
+      method: GET            # GET | POST
+      form_data: {}          # POST 파라미터 ({page} 치환 지원)
+      encoding: auto         # auto | euc-kr | utf-8 ...
+      verify_tls: true
+      row_selector: "table.board tr:has(a)"
+      skip_rows: 0
+      url_base: "https://.../"          # 상대 href resolve 기준 (기본: list_url)
+      id_pattern: "bidx=(\\d+)"         # natural key 추출 (실패 시 URL 해시 fallback)
+      fields:
+        title: {selector: "td.subject a", attr: text}
+        link:  {selector: "td.subject a", attr: href}
+        # onclick 게시판: {selector: "a", attr: onclick, pattern: "fnView\\('(\\d+)'\\)",
+        #                  template: "https://.../view.do?id={value}"}
+        date:  {selector: "td.date", attr: text, date_format: "%Y-%m-%d"}   # 옵션
+        org:   {selector: "td.writer", attr: text}                           # 옵션
+"""
+from __future__ import annotations
+
+import logging
+import re
+from datetime import datetime, timezone
+from urllib.parse import urljoin
+
+from bs4 import BeautifulSoup
+
+from ..config import SourceConfig
+from ..httpio import decode_body, fetch_bytes, normalize_url
+from ..models import Item
+from .base import CollectError, RunContext
+
+log = logging.getLogger(__name__)
+
+_DATE_CLEAN_RE = re.compile(r"[.\-/]")
+
+
+def extract_field(row_el, spec: dict) -> str | None:
+    """FieldSpec 해석: selector로 요소 선택 → attr 값 → pattern 추출 → template 치환."""
+    selector = spec.get("selector")
+    el = row_el.select_one(selector) if selector else row_el
+    if el is None:
+        return None
+    attr = spec.get("attr", "text")
+    if attr == "text":
+        value = el.get_text(" ", strip=True)
+    else:
+        value = el.get(attr)
+        if isinstance(value, list):
+            value = " ".join(value)
+    if not value:
+        return None
+    value = str(value).strip()
+    pattern = spec.get("pattern")
+    if pattern:
+        m = re.search(pattern, value)
+        if not m:
+            return None
+        value = m.group(1)
+    template = spec.get("template")
+    if template:
+        value = template.replace("{value}", value)
+    return value or None
+
+
+def _parse_date(text: str, date_format: str | None) -> datetime | None:
+    text = text.strip()
+    if not text:
+        return None
+    candidates = [date_format] if date_format else []
+    # 흔한 한국 게시판 포맷들 폴백
+    candidates += ["%Y-%m-%d", "%Y.%m.%d", "%Y/%m/%d", "%y-%m-%d", "%y.%m.%d"]
+    for fmt in candidates:
+        if not fmt:
+            continue
+        try:
+            return datetime.strptime(text, fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    # "2026.08.29 14:00" 같은 꼬리 제거 후 재시도
+    m = re.match(r"(\d{2,4})[.\-/](\d{1,2})[.\-/](\d{1,2})", text)
+    if m:
+        y, mo, d = (int(g) for g in m.groups())
+        if y < 100:
+            y += 2000
+        try:
+            return datetime(y, mo, d, tzinfo=timezone.utc)
+        except ValueError:
+            return None
+    return None
+
+
+def parse_list_page(html: str, source: SourceConfig, base_url: str) -> list[Item]:
+    cfg = source.options
+    soup = BeautifulSoup(html, "html.parser")
+    row_selector = cfg.get("row_selector")
+    if not row_selector:
+        raise CollectError(f"'{source.id}': board.row_selector 미설정")
+    rows = soup.select(row_selector)
+    fields: dict = cfg.get("fields") or {}
+    if "title" not in fields or "link" not in fields:
+        raise CollectError(f"'{source.id}': board.fields.title/link 필수")
+    skip = int(cfg.get("skip_rows", 0))
+    id_pattern = cfg.get("id_pattern")
+    url_base = cfg.get("url_base") or base_url
+
+    items: list[Item] = []
+    for row in rows[skip:]:
+        title = extract_field(row, fields["title"])
+        link = extract_field(row, fields["link"])
+        if not title or not link:
+            continue
+        url = normalize_url(urljoin(url_base, link))
+        if not url:  # javascript: 등 비 http(s) 링크
+            continue
+        natural_key = None
+        if id_pattern:
+            m = re.search(id_pattern, url) or re.search(id_pattern, link)
+            if m:
+                natural_key = m.group(1)
+        extra: dict = {}
+        published_at = None
+        if "date" in fields:
+            date_text = extract_field(row, fields["date"])
+            if date_text:
+                published_at = _parse_date(date_text, fields["date"].get("date_format"))
+        if "org" in fields:
+            org = extract_field(row, fields["org"])
+            if org:
+                extra["org"] = org
+        items.append(Item(
+            source_id=source.id,
+            category=source.category,
+            title=title,
+            url=url,
+            natural_key=natural_key,
+            key_prefix=f"board:{source.id}",
+            published_at=published_at,
+            author=source.name,
+            extra=extra,
+        ))
+    return items
+
+
+def collect(source: SourceConfig, ctx: RunContext) -> list[Item]:
+    cfg = source.options
+    list_url = cfg.get("list_url")
+    if not list_url:
+        raise CollectError(f"'{source.id}': board.list_url 미설정")
+    pages = int(cfg.get("pages", 1))
+    method = (cfg.get("method") or "GET").upper()
+    encoding = cfg.get("encoding", "auto")
+    verify_tls = bool(cfg.get("verify_tls", True))
+    if not verify_tls:
+        log.warning("'%s': TLS 검증 비활성 (구형 인증서 사이트)", source.id)
+
+    items: list[Item] = []
+    for page in range(1, pages + 1):
+        url = list_url.replace("{page}", str(page))
+        form_data = None
+        if method == "POST":
+            form_data = {
+                k: str(v).replace("{page}", str(page))
+                for k, v in (cfg.get("form_data") or {}).items()
+            }
+        try:
+            content, charset = fetch_bytes(
+                url, timeout=source.timeout, verify_tls=verify_tls,
+                method=method, data=form_data,
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise CollectError(f"'{source.id}' p{page} 요청 실패: {exc}") from exc
+        html = decode_body(content, charset, encoding)
+        items.extend(parse_list_page(html, source, base_url=url))
+    return items
