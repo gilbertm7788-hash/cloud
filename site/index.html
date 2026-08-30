@@ -49,6 +49,7 @@
   function dday(row) {
     if (row.deadline == null) return '<span class="badge warn">마감 확인 필요</span>';
     var d = row.d_day;
+    if (d < 0) return '<span class="badge warn">마감</span>';
     if (d === 0) return '<span class="badge due">오늘 마감</span>';
     if (d <= 3) return '<span class="badge due">D-' + d + "</span>";
     return '<span class="badge">D-' + d + " · " + esc(row.deadline) + "</span>";

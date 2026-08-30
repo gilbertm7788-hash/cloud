@@ -19,6 +19,7 @@ from .collectors import narajangteo
 from .config import AppConfig, apply_keyword_filters, load_config
 from .dedup import SeenStore
 from .format_telegram import format_digest, format_item, link_preview_for
+from .httpio import redact_secrets
 from .models import CATEGORY_META, Item
 from .report import SourceResult, render_report, update_health, verify_sources, write_github_summary
 from .site_build import build_site
@@ -78,14 +79,26 @@ def _item_from_row(row: dict) -> Item:
     )
 
 
+def _is_transient(exc: TelegramError) -> bool:
+    """일시적 장애(레이트리밋·네트워크·서버오류)면 True — 이때만 재시도 루프를 중단한다."""
+    text = str(exc).lower()
+    return ("429" in text or "네트워크" in text or "timeout" in text
+            or "[50" in text or "재시도 소진" in text)
+
+
 def _retry_pending(store, tg: TelegramClient, staging_chat: str, site_url: str,
                    errors: list[str]) -> int:
-    """이전 run에서 게시 실패한 아이템 재시도."""
+    """이전 run에서 게시 실패한 아이템 재시도.
+
+    결정적 오류(잘못된 메시지 등)는 해당 건만 'failed'로 내려 큐가 막히지 않게 하고,
+    일시적 장애일 때만 루프를 멈춰 다음 run에 통째로 재시도한다.
+    """
     sent = 0
     for row in store.pending(limit=25):
         item = _item_from_row(row)
         if not item.title or not item.url:
-            store.mark_posted(row["id"], None)  # 복원 불가 row는 재시도 루프에서 제거
+            # 복원 불가 row — 'posted'로 올리면 아카이브에 빈 항목이 실리므로 종료 상태로만 내림
+            store.mark_status(row["id"], "failed")
             continue
         try:
             mid = tg.send_message(staging_chat, format_item(item, site_url),
@@ -94,7 +107,9 @@ def _retry_pending(store, tg: TelegramClient, staging_chat: str, site_url: str,
             sent += 1
         except TelegramError as exc:
             errors.append(f"pending 재시도 실패({row['id']}): {exc}")
-            break
+            if _is_transient(exc):
+                break
+            store.mark_status(row["id"], "failed")  # 영구 실패 — 큐에서 제외
     return sent
 
 
@@ -134,14 +149,17 @@ def run_collect(args: argparse.Namespace) -> int:
         try:
             items = collector(source, ctx)
         except CollectError as exc:
-            log.warning("소스 실패 %s: %s", source.id, exc)
-            errors.append(f"{source.id}: {exc}")
-            health_results.append(SourceResult(source.id, source.name, False, error=str(exc)[:300]))
+            # 예외 문자열에 요청 URL(=API 키·릴레이 주소)이 섞일 수 있어 항상 마스킹
+            msg = redact_secrets(str(exc), cfg.secrets.values())[:300]
+            log.warning("소스 실패 %s: %s", source.id, msg)
+            errors.append(f"{source.id}: {msg}")
+            health_results.append(SourceResult(source.id, source.name, False, error=msg))
             continue
         except Exception as exc:  # noqa: BLE001 — 개별 소스의 예상 못한 오류도 격리
-            log.exception("소스 예외 %s", source.id)
-            errors.append(f"{source.id}: {type(exc).__name__}: {exc}")
-            health_results.append(SourceResult(source.id, source.name, False, error=str(exc)[:300]))
+            msg = redact_secrets(f"{type(exc).__name__}: {exc}", cfg.secrets.values())[:300]
+            log.error("소스 예외 %s: %s", source.id, msg)
+            errors.append(f"{source.id}: {msg}")
+            health_results.append(SourceResult(source.id, source.name, False, error=msg))
             continue
 
         health_results.append(SourceResult(source.id, source.name, True, count=len(items)))
@@ -203,11 +221,13 @@ def run_collect(args: argparse.Namespace) -> int:
                     store.mark_posted(it.dedup_key, mid)
                     posted_total += 1
                 except TelegramError as exc:
-                    # pending으로 남겨 다음 run의 _retry_pending이 재시도
                     errors.append(f"{source.id} 게시 실패: {exc}")
-                    break
+                    if _is_transient(exc):
+                        break  # 일시적 장애 — pending으로 남겨 다음 run에서 재시도
+                    store.mark_status(it.dedup_key, "failed")
 
     if not args.dry_run:
+        store.prune()  # 오래된 미게시 row 정리 (state/seen.db 무한 증가 방지)
         alerts = update_health(health_results)
         for sid in alerts:
             _notify(cfg, tg, f"소스 '{sid}' 3회 연속 실패/0건 — 게시판 구조 변경 여부 확인 필요")
@@ -216,7 +236,7 @@ def run_collect(args: argparse.Namespace) -> int:
             build_site(store, cfg.site, use_llm=(slot == "evening"))
         except Exception as exc:  # noqa: BLE001
             log.exception("사이트 빌드 실패")
-            errors.append(f"site_build: {exc}")
+            errors.append(redact_secrets(f"site_build: {exc}", cfg.secrets.values()))
         if slot == "evening":
             try:
                 day = datetime.now(KST).date()
@@ -224,7 +244,7 @@ def run_collect(args: argparse.Namespace) -> int:
                 write_draft(content, day)
             except Exception as exc:  # noqa: BLE001
                 log.exception("블로그 초안 생성 실패")
-                errors.append(f"blog_draft: {exc}")
+                errors.append(redact_secrets(f"blog_draft: {exc}", cfg.secrets.values()))
 
     if errors and not args.dry_run:
         summary = "\n".join(f"· {e}" for e in errors[:15])
@@ -232,6 +252,8 @@ def run_collect(args: argparse.Namespace) -> int:
     elif errors:
         log.info("[dry-run] 오류 %d건 — 알림 생략", len(errors))
     log.info("완료: %d건 게시, %d건 오류", posted_total, len(errors))
+    if tg is not None:
+        tg.close()
     store.close()
     # 부분 실패는 성공으로 처리 — 전 소스 실패 시에만 실패 종료
     all_failed = bool(sources) and all(not r.ok for r in health_results)

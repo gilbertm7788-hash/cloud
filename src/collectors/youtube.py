@@ -11,9 +11,10 @@ import feedparser
 import httpx
 
 from ..config import SourceConfig
-from ..httpio import fetch_bytes
+from ..httpio import fetch_bytes, normalize_url, redact_secrets
 from ..models import Item
 from .base import CollectError, RunContext
+from .rss import _entry_datetime
 
 _HANGUL_RE = re.compile(r"[가-힣]")
 
@@ -42,11 +43,15 @@ def collect_rss(source: SourceConfig, ctx: RunContext) -> list[Item]:
         title = (getattr(entry, "title", "") or "").strip()
         if not video_id or not title:
             continue
+        url = normalize_url(link) if link else ""
+        if not url:  # 링크가 없거나 http(s)가 아니면 표준 시청 URL로 대체
+            url = f"https://www.youtube.com/watch?v={video_id}"
         items.append(Item(
             source_id=source.id,
             category="youtube",
             title=title,
-            url=link or f"https://www.youtube.com/watch?v={video_id}",
+            url=url,
+            published_at=_entry_datetime(entry),
             natural_key=video_id,
             key_prefix="yt",
             author=channel_name,
@@ -64,8 +69,8 @@ def collect_api(source: SourceConfig, ctx: RunContext) -> list[Item]:
     query = source.options.get("query")
     if not query:
         raise CollectError(f"'{source.id}': youtube.query 미설정")
+    # 키는 헤더로 전달 — URL에 들어가면 httpx 예외 문자열을 타고 로그·커밋 파일로 샌다
     params = {
-        "key": api_key,
         "part": "snippet",
         "q": query,
         "type": "video",
@@ -80,11 +85,17 @@ def collect_api(source: SourceConfig, ctx: RunContext) -> list[Item]:
         params["publishedAfter"] = last
     try:
         with httpx.Client(timeout=source.timeout) as client:
-            resp = client.get("https://www.googleapis.com/youtube/v3/search", params=params)
+            resp = client.get(
+                "https://www.googleapis.com/youtube/v3/search",
+                params=params,
+                headers={"X-goog-api-key": api_key},
+            )
         resp.raise_for_status()
         data = resp.json()
     except Exception as exc:  # noqa: BLE001
-        raise CollectError(f"'{source.id}' search.list 실패: {exc}") from exc
+        raise CollectError(
+            f"'{source.id}' search.list 실패: {redact_secrets(str(exc), [api_key])}"
+        ) from exc
 
     items: list[Item] = []
     newest: str | None = last

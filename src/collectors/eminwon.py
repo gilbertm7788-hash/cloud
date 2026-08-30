@@ -99,7 +99,5 @@ def collect(source: SourceConfig, ctx: RunContext) -> list[Item]:
     except Exception as exc:  # noqa: BLE001
         raise CollectError(f"'{source.id}' 요청 실패: {exc}") from exc
     html = decode_body(content, charset, cfg.get("encoding", "auto"))
-    items = parse_list_html(html, source, host)
-    if not items:
-        raise CollectError(f"'{source.id}': 목록에서 공고를 찾지 못함 (게시판 구조 확인 필요)")
-    return items
+    # 공고가 없는 날도 정상 — 0건은 source_health의 연속 카운터가 잡는다
+    return parse_list_html(html, source, host)

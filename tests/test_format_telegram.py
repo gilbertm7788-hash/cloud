@@ -80,3 +80,15 @@ def test_overflow_fallback_no_unclosed_tags():
     assert "원문 보기</a>" in text                        # 링크 보존
     title_line = text.split("\n")[0]
     assert not re.search(r"&[a-zA-Z#0-9]*$", title_line.removesuffix("</b>"))
+
+
+def test_pathological_long_url_stays_under_limit():
+    """URL 자체가 한도를 넘어도 MESSAGE_TOO_LONG(400)이 나지 않아야 함."""
+    item = make_item(title="공고", url="https://ex.com/?q=" + "a" * 4300)
+    assert len(format_item(item)) <= SAFE_LIMIT
+
+
+def test_digest_blocks_stay_under_limit_with_long_urls():
+    items = [make_item(title=f"공고 {i}", url="https://ex.com/?q=" + "b" * 3000)
+             for i in range(5)]
+    assert all(len(m) <= SAFE_LIMIT for m in format_digest(items, "모음"))

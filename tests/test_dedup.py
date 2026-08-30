@@ -81,3 +81,13 @@ def test_pending_roundtrip(tmp_path):
     store.mark_posted(item.dedup_key, 9)
     assert store.pending() == []
     store.close()
+
+
+def test_mark_status_removes_from_pending(tmp_path):
+    store = SeenStore(tmp_path / "seen.db")
+    item = make_item(key="f1")
+    store.mark_seen(item, status="pending")
+    store.mark_status(item.dedup_key, "failed")
+    assert store.pending() == []          # 재시도 큐에서 빠짐
+    assert store.is_seen(item.dedup_key)  # 중복 재수집은 여전히 차단
+    store.close()

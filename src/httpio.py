@@ -5,6 +5,7 @@ import logging
 import re
 import subprocess
 import time
+from collections.abc import Iterable
 from urllib.parse import unquote, urlsplit, urlunsplit
 
 import httpx
@@ -20,7 +21,8 @@ _META_CHARSET_RE = re.compile(
 _JSESSIONID_PATH_RE = re.compile(r";jsessionid=[^?#/]*", re.IGNORECASE)
 _TRACKING_PARAMS = {"utm_source", "utm_medium", "utm_campaign", "utm_term",
                     "utm_content", "fbclid", "gclid", "igshid"}
-_SESSION_PARAMS = {"jsessionid", "phpsessid", "sessionid", "sid"}
+# 세션 토큰만 — sid/sessionid는 한국 게시판에서 글 식별자로 쓰이므로 제거하지 않는다
+_SESSION_PARAMS = {"jsessionid", "phpsessid", "aspsessionid"}
 
 
 def decode_body(content: bytes, http_charset: str | None, encoding: str = "auto") -> str:
@@ -33,6 +35,7 @@ def decode_body(content: bytes, http_charset: str | None, encoding: str = "auto"
     m = _META_CHARSET_RE.search(content[:4096])
     if m:
         candidates.append(m.group(1).decode("ascii", errors="ignore"))
+    failed: list[str] = []
     for cand in candidates:
         norm = cand.strip().lower()
         if norm in ("euc-kr", "euc_kr", "ks_c_5601-1987", "ksc5601", "cp949", "ms949"):
@@ -42,10 +45,14 @@ def decode_body(content: bytes, http_charset: str | None, encoding: str = "auto"
         except LookupError:
             continue
         except UnicodeDecodeError:
-            # 선언된 인코딩이 맞는데 일부 바이트만 깨진 경우 — 전체를 다른 인코딩으로
-            # 오판하는 것보다 선언 인코딩 + replace가 훨씬 안전
-            return content.decode(norm, errors="replace")
-    # 헤더/메타 단서가 없거나 실패: utf-8 시도 후 cp949 폴백
+            # 다음 후보(<meta charset> 등)를 먼저 시도 — 헤더 charset이 틀린 사이트가 흔함.
+            # 모든 후보가 실패하면 아래에서 첫 후보 + replace로 복구.
+            failed.append(norm)
+            continue
+    # 후보가 모두 디코드 실패: 선언된 첫 인코딩 + replace (일부 바이트만 깨진 경우 보존율이 높음)
+    if failed:
+        return content.decode(failed[0], errors="replace")
+    # 단서가 아예 없을 때만 utf-8 → cp949 휴리스틱
     try:
         return content.decode("utf-8")
     except UnicodeDecodeError:
@@ -147,8 +154,21 @@ def normalize_url(url: str) -> str:
     ))
 
 
-def redact_secrets(text: str) -> str:
-    """로그 출력용: serviceKey·봇 토큰류 마스킹."""
-    text = re.sub(r"(serviceKey=)[^&\s]+", r"\1***", text, flags=re.IGNORECASE)
+_CRED_PARAM_RE = re.compile(
+    r"([?&](?:serviceKey|key|api_?key|access_token|token|secret|client_secret)=)[^&\s'\"]+",
+    re.IGNORECASE,
+)
+
+
+def redact_secrets(text: str, extra_values: Iterable[str] = ()) -> str:
+    """외부로 나가는 문자열(로그·알림·커밋되는 파일)에서 시크릿 마스킹.
+
+    - extra_values: 설정된 시크릿의 실제 값들. 정규식이 예상 못한 형태도 값 자체로 잡는다.
+    - 그 외 credential성 쿼리 파라미터와 봇 토큰은 패턴으로 마스킹.
+    """
+    for value in extra_values:
+        if value and len(value) >= 8:  # 짧은 값은 오탐 위험이 커서 제외
+            text = text.replace(value, "***")
+    text = _CRED_PARAM_RE.sub(r"\1***", text)
     text = re.sub(r"(bot)\d+:[A-Za-z0-9_-]{30,}", r"\1***", text)
     return text

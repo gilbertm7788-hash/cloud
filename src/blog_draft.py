@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import re
 from datetime import date, datetime, time, timezone, timedelta
 from pathlib import Path
 
@@ -14,6 +15,13 @@ from .models import CATEGORY_META
 
 KST = timezone(timedelta(hours=9))
 DRAFTS_DIR = Path("drafts")
+
+
+def _cell(value: object) -> str:
+    """마크다운 표 셀 이스케이프 — 스크래핑한 값이 표를 깨거나 마크업을 주입하지 못하게."""
+    text = str(value) if value not in (None, "") else "-"
+    text = re.sub(r"\s+", " ", text).strip()  # 개행 제거 (표 구조 보호)
+    return text.replace("\\", "\\\\").replace("|", "\\|").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def _day_range_utc(day: date) -> tuple[datetime, datetime]:
@@ -67,10 +75,12 @@ def build_draft(store: SeenStore, day: date, *, use_llm: bool = True,
         lines.append("|---|---|---|---|")
         for it in cat_items:
             extra = it.get("extra") or {}
-            org = extra.get("org") or it.get("author") or "-"
-            deadline = extra.get("deadline") or "-"
-            title = (it.get("title") or "").replace("|", "\\|")
-            lines.append(f"| {title} | {org} | {deadline} | [바로가기]({it.get('url')}) |")
+            url = str(it.get("url") or "")
+            link = f"[바로가기]({url})" if url.startswith(("http://", "https://")) else "-"
+            lines.append(
+                f"| {_cell(it.get('title'))} | {_cell(extra.get('org') or it.get('author'))} "
+                f"| {_cell(extra.get('deadline'))} | {link} |"
+            )
         lines.append("")
         lines.append("[한 줄 해설: 이 섹션에서 주목할 항목과 이유를 직접 작성]")
 

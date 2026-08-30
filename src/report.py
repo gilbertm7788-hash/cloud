@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .collectors import COLLECTORS, RunContext
 from .config import SourceConfig
+from .httpio import redact_secrets
 
 HEALTH_PATH = Path("state/source_health.json")
 FAIL_ALERT_THRESHOLD = 3  # 연속 실패/0건 경고 기준
@@ -43,8 +44,9 @@ def verify_sources(sources: list[SourceConfig], ctx: RunContext) -> SourceReport
                 samples=[it.title[:60] for it in items[:3]],
             ))
         except Exception as exc:  # noqa: BLE001
-            report.results.append(SourceResult(source.id, source.name, False,
-                                               error=str(exc)[:300]))
+            # 에러 문자열에는 요청 URL(=API 키)이 섞일 수 있음 — 저장·출력 전에 마스킹
+            error = redact_secrets(str(exc), ctx.secrets.values())[:300]
+            report.results.append(SourceResult(source.id, source.name, False, error=error))
     return report
 
 

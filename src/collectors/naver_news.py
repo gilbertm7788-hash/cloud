@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import html
 import re
 from datetime import datetime
 from urllib.parse import urlsplit
@@ -15,16 +16,10 @@ from ..httpio import normalize_url
 from ..models import Item, url_hash_key
 from .base import CollectError, RunContext
 
-_TAG_RE = re.compile(r"</?b>|&quot;|&amp;|&lt;|&gt;|&apos;")
-
-_ENTITY_MAP = {"&quot;": '"', "&amp;": "&", "&lt;": "<", "&gt;": ">", "&apos;": "'"}
-
 
 def _clean(text: str) -> str:
-    text = re.sub(r"</?b>", "", text or "")
-    for ent, ch in _ENTITY_MAP.items():
-        text = text.replace(ent, ch)
-    return text.strip()
+    """네이버 검색 API의 <b> 하이라이트 제거 + HTML 엔티티 디코딩(stdlib 1회 처리)."""
+    return html.unescape(re.sub(r"</?b>", "", text or "")).strip()
 
 
 def collect(source: SourceConfig, ctx: RunContext) -> list[Item]:

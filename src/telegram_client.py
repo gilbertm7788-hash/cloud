@@ -32,6 +32,17 @@ class TelegramClient:
         self.min_interval = min_interval
         self.timeout = timeout
         self._last_sent = 0.0
+        # 메시지마다 새 커넥션을 여는 대신 하나를 재사용 (TLS 핸드셰이크 절감)
+        self._client = httpx.Client(timeout=timeout)
+
+    def close(self) -> None:
+        self._client.close()
+
+    def __enter__(self) -> "TelegramClient":
+        return self
+
+    def __exit__(self, *exc_info) -> None:
+        self.close()
 
     def _throttle(self) -> None:
         wait = self._last_sent + self.min_interval - time.monotonic()
@@ -42,8 +53,7 @@ class TelegramClient:
         for attempt in range(retries + 1):
             self._throttle()
             try:
-                with httpx.Client(timeout=self.timeout) as client:
-                    resp = client.post(f"{self.base}/{method}", json=payload)
+                resp = self._client.post(f"{self.base}/{method}", json=payload)
                 self._last_sent = time.monotonic()
                 body = resp.json()
             except (httpx.TransportError, json.JSONDecodeError) as exc:

@@ -20,7 +20,7 @@ KST = timezone(timedelta(hours=9))
 SITE_DIR = Path("site")
 POSTS_DIR = SITE_DIR / "posts"
 
-ACTIVE_STATUSES = ("posted", "seen", "skipped", "pending")
+ACTIVE_STATUSES = ("posted", "seen", "skipped", "pending")  # "failed"는 제외
 NEWS_LIKE = ("news", "gov", "association")
 COMMITTEE_UNKNOWN_DEADLINE_DAYS = 30
 BID_UNKNOWN_DEADLINE_DAYS = 14

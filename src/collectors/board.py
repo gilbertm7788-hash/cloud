@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
@@ -36,7 +36,7 @@ from .base import CollectError, RunContext
 
 log = logging.getLogger(__name__)
 
-_DATE_CLEAN_RE = re.compile(r"[.\-/]")
+KST = timezone(timedelta(hours=9))  # 한국 게시판 날짜는 KST 기준
 
 
 def extract_field(row_el, spec: dict) -> str | None:
@@ -78,7 +78,7 @@ def _parse_date(text: str, date_format: str | None) -> datetime | None:
         if not fmt:
             continue
         try:
-            return datetime.strptime(text, fmt).replace(tzinfo=timezone.utc)
+            return datetime.strptime(text, fmt).replace(tzinfo=KST)
         except ValueError:
             continue
     # "2026.08.29 14:00" 같은 꼬리 제거 후 재시도
@@ -88,7 +88,7 @@ def _parse_date(text: str, date_format: str | None) -> datetime | None:
         if y < 100:
             y += 2000
         try:
-            return datetime(y, mo, d, tzinfo=timezone.utc)
+            return datetime(y, mo, d, tzinfo=KST)
         except ValueError:
             return None
     return None

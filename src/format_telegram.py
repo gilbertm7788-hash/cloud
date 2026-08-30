@@ -60,10 +60,13 @@ def format_item(item: Item, site_url: str = "") -> str:
 
     text = "\n".join(lines)
     if len(text) > SAFE_LIMIT:
-        # 단일 아이템이 한도를 넘는 극단 케이스: 제목·링크만 남기되 태그·엔티티를 절대 자르지 않음
+        # 단일 아이템이 한도를 넘는 극단 케이스: 제목·링크만 남기되 태그·엔티티는 절대 자르지 않음
         budget = SAFE_LIMIT - len(link_line) - 100
-        short = escape_html(item.title.strip())[:budget]
-        short = _PARTIAL_ENTITY_RE.sub("", short)
+        if budget < 0:
+            # URL 자체가 한도를 넘는 병리적 케이스 — 링크를 앵커 없이 잘라 넣어
+            # MESSAGE_TOO_LONG(400)로 아이템이 영구 실패하는 것을 막는다
+            return escape_html(item.title.strip())[:200] + "\n" + escape_html(item.url)[:SAFE_LIMIT - 250]
+        short = _PARTIAL_ENTITY_RE.sub("", escape_html(item.title.strip())[:budget])
         text = f"{m['emoji']} [{m['label']}] <b>{short}</b>\n{link_line}"
     return text
 
@@ -75,7 +78,11 @@ def format_digest(items: list[Item], title: str, site_url: str = "") -> list[str
         t = it.title.strip()
         if len(t) > 300:  # 단일 블록이 분할 한도를 넘지 않게 원문 단계에서 자름
             t = t[:297] + "..."
-        blocks.append(f'· <a href="{escape_html(it.url)}">{escape_html(t)}</a>')
+        url = it.url
+        if len(url) > 1500:  # 비정상적으로 긴 URL은 링크 없이 제목만 (한도 초과 방지)
+            blocks.append(f"· {escape_html(t)}")
+        else:
+            blocks.append(f'· <a href="{escape_html(url)}">{escape_html(t)}</a>')
     if site_url:
         blocks.append(f'<a href="{escape_html(site_url)}">전체 보기</a>')
     return split_blocks(blocks)
@@ -97,10 +104,6 @@ def split_blocks(blocks: list[str], limit: int = SAFE_LIMIT) -> list[str]:
     if current:
         messages.append("\n".join(current))
     return messages
-
-
-def split_html(text: str, limit: int = SAFE_LIMIT) -> list[str]:
-    return split_blocks(text.split("\n"), limit)
 
 
 def link_preview_for(item: Item) -> dict | None:

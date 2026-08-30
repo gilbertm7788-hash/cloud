@@ -41,3 +41,29 @@ def test_normalize_rejects_non_http_schemes():
 
 def test_normalize_keeps_blank_values():
     assert normalize_url("https://ex.com/p?a=&b=2") == "https://ex.com/p?a=&b=2"
+
+
+def test_redact_masks_generic_credential_params():
+    leak = "403 Forbidden for url 'https://googleapis.com/v3/search?key=AIzaSyREAL123&part=x'"
+    assert "AIzaSyREAL123" not in redact_secrets(leak)
+
+
+def test_redact_masks_configured_secret_values():
+    # 정규식이 모르는 형태(릴레이 호스트)도 값 자체로 마스킹돼야 함
+    relay = "https://g2b-relay.acme.workers.dev"
+    assert relay not in redact_secrets(f"500 for url '{relay}/1230000/x'", [relay])
+
+
+def test_redact_ignores_short_values():
+    assert redact_secrets("hello world", ["a", "xy"]) == "hello world"
+
+
+def test_sid_is_not_stripped():
+    # sid는 한국 게시판에서 글 식별자 — 제거하면 링크가 깨지고 dedup이 충돌한다
+    assert "sid=12345" in normalize_url("https://molit.go.kr/b.do?sid=12345&id=7")
+
+
+def test_mislabeled_charset_falls_back_to_meta():
+    from src.httpio import decode_body
+    raw = "<html><meta charset='euc-kr'><body>한국건설신문 위원 모집</body></html>".encode("cp949")
+    assert "한국건설신문 위원 모집" in decode_body(raw, "utf-8", "auto")  # 헤더가 틀려도 meta로 복구

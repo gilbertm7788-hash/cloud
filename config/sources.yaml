@@ -36,7 +36,7 @@ sources:
     category: news
     slots: [morning, evening]
     rss:
-      url: "http://www.conslove.co.kr/rss/allArticle.xml"
+      url: "https://www.conslove.co.kr/rss/allArticle.xml"
       id_pattern: "idxno=(\\d+)"
 
   - id: engdaily

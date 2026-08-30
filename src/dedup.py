@@ -73,6 +73,11 @@ class SeenStore:
         )
         self.conn.commit()
 
+    def mark_status(self, key: str, status: str) -> None:
+        """게시 불가 등 종료 상태로 전환 (재시도 큐에서 제외)."""
+        self.conn.execute("UPDATE seen SET status=? WHERE id=?", (status, key))
+        self.conn.commit()
+
     def mark_posted(self, key: str, message_id: int | None = None) -> None:
         self.conn.execute(
             "UPDATE seen SET status='posted', posted_at=?, tg_message_id=? WHERE id=?",

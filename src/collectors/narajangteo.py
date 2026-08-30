@@ -16,7 +16,7 @@ from urllib.parse import unquote, urlencode
 import httpx
 
 from ..config import SourceConfig
-from ..httpio import fetch_via_curl, redact_secrets
+from ..httpio import fetch_via_curl, normalize_url, redact_secrets
 from ..models import Item
 from .base import CollectError, RunContext
 
@@ -67,7 +67,10 @@ def g2b_request(op: str, params: dict, ctx: RunContext, timeout: float = 30) -> 
     try:
         raw = _do_request(url, mode, ctx.secrets.get("G2B_RELAY_SECRET"), timeout)
     except Exception as exc:  # noqa: BLE001
-        raise CollectError(f"g2b {op} 요청 실패({mode}): {redact_secrets(str(exc))}") from exc
+        raise CollectError(
+            f"g2b {op} 요청 실패({mode}): "
+            f"{redact_secrets(str(exc), ctx.secrets.values())}"
+        ) from exc
     text = raw.decode("utf-8", errors="replace")
     try:
         body = json.loads(text)
@@ -136,8 +139,10 @@ def _fetch_range(op: str, begin: datetime, end: datetime, extra_params: dict,
     except PeriodTooWideError:
         if depth >= 5:
             raise CollectError(f"g2b {op}: 기간 분할 한도 초과")
+        # 이미 받은 페이지는 버리고 구간을 반씩 나눠 전량 재조회 (중복은 dedup이 처리)
+        rows = []
         mid = begin + (end - begin) / 2
-        rows = _fetch_range(op, begin, mid, extra_params, ctx, timeout, depth + 1)
+        rows += _fetch_range(op, begin, mid, extra_params, ctx, timeout, depth + 1)
         rows += _fetch_range(op, mid, end, extra_params, ctx, timeout, depth + 1)
     return rows
 
@@ -148,7 +153,8 @@ def _row_to_item(row: dict, source: SourceConfig) -> Item | None:
     if not no or not title:
         return None
     ord_ = str(row.get("bidNtceOrd") or "0").strip() or "0"
-    url = str(row.get("bidNtceDtlUrl") or row.get("bidNtceUrl") or "").strip()
+    # API 응답의 URL도 신뢰하지 않고 스킴 검증 (javascript: 등이 href로 새는 것 방지)
+    url = normalize_url(str(row.get("bidNtceDtlUrl") or row.get("bidNtceUrl") or "").strip())
     if not url:
         url = f"https://www.g2b.go.kr:8101/ep/invitation/publish/bidInfoDtl.do?bidno={no}&bidseq={ord_}"
     extra: dict = {}
