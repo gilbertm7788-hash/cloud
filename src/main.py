@@ -59,7 +59,7 @@ def _telegram(cfg: AppConfig) -> tuple[TelegramClient | None, str]:
 
 def _notify(cfg: AppConfig, tg: TelegramClient | None, text: str) -> None:
     if tg is None:
-        log.error("알림 전송 불가(토큰 미설정): %s", text)
+        log.warning("알림 전송 생략(텔레그램 미설정): %s", text)
         return
     admin = cfg.secrets.get("TELEGRAM_ADMIN_CHAT_ID")
     chat_id = admin or cfg.secrets.get("TELEGRAM_STAGING_CHAT_ID") or ""
@@ -121,9 +121,16 @@ def run_collect(args: argparse.Namespace) -> int:
     store = ctx.seen_store
     tg, staging_chat = _telegram(cfg)
     posting = not (args.dry_run or args.no_post)
+    notices: list[str] = []
     if posting and tg is None:
-        log.error("TELEGRAM_BOT_TOKEN/TELEGRAM_STAGING_CHAT_ID 미설정 — --no-post로 실행하거나 시크릿을 등록하세요")
-        return 1
+        # 설정 전 단계 — 실패로 죽이면 cron마다 실패 메일만 쌓인다.
+        # 게시만 생략하고 수집·사이트 빌드는 정상 진행해 사이트가 먼저 채워지게 한다.
+        posting = False
+        notices.append(
+            "텔레그램 시크릿(TELEGRAM_BOT_TOKEN, TELEGRAM_STAGING_CHAT_ID) 미등록 — "
+            "이번 실행은 게시 없이 수집·사이트 빌드만 수행했습니다. docs/checklist.md 1번 참조."
+        )
+        log.warning(notices[-1])
 
     wanted = set(args.sources.split(",")) if args.sources else None
     sources = [
@@ -257,7 +264,30 @@ def run_collect(args: argparse.Namespace) -> int:
     store.close()
     # 부분 실패는 성공으로 처리 — 전 소스 실패 시에만 실패 종료
     all_failed = bool(sources) and all(not r.ok for r in health_results)
+    if not args.dry_run:
+        write_github_summary(_collect_summary(slot, posting, posted_total, health_results,
+                                              errors, notices))
     return 1 if all_failed else 0
+
+
+def _collect_summary(slot: str, posting: bool, posted: int, results: list[SourceResult],
+                     errors: list[str], notices: list[str]) -> str:
+    """GitHub Actions 요약 탭용 실행 리포트 (마스킹된 문자열만 들어온다)."""
+    lines = [f"# collect 실행 요약 — slot: {slot}", ""]
+    for n in notices:
+        lines.append(f"> ⚠️ {n}")
+    lines += [
+        "",
+        f"- 텔레그램 게시: {'활성' if posting else '비활성'} / 게시 {posted}건",
+        f"- 소스 결과: 성공 {sum(1 for r in results if r.ok)} / 실패 {sum(1 for r in results if not r.ok)}",
+        "",
+        "| 소스 | 상태 | 수집 건수 | 비고 |", "|---|---|---|---|",
+    ]
+    for r in results:
+        lines.append(f"| {r.name} (`{r.source_id}`) | {'✅' if r.ok else '❌'} | {r.count} | {r.error} |")
+    if errors:
+        lines += ["", "## 오류", ""] + [f"- {e}" for e in errors[:20]]
+    return "\n".join(lines)
 
 
 def run_verify(args: argparse.Namespace) -> int:  # noqa: ARG001
