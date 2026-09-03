@@ -1,1 +1,46 @@
-{}
+{
+ "ikld": {
+  "consecutive_bad": 1,
+  "last_error": "'ikld' 피드 요청 실패: [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1010)"
+ },
+ "conslove": {
+  "consecutive_bad": 1,
+  "last_error": "'conslove' 피드 요청 실패: [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: Hostname mismatch, certificate is not valid for 'www.conslove.co.kr'. (_ssl.c:1010)"
+ },
+ "engdaily": {
+  "consecutive_bad": 0,
+  "last_error": ""
+ },
+ "koscaj": {
+  "consecutive_bad": 0,
+  "last_error": ""
+ },
+ "constimes": {
+  "consecutive_bad": 0,
+  "last_error": ""
+ },
+ "molit": {
+  "consecutive_bad": 1,
+  "last_error": "'molit' 피드 요청 실패: Client error '404 Not Found' for url 'https://www.korea.kr/rss/dept_molit.xml'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404"
+ },
+ "ksce_external": {
+  "consecutive_bad": 1,
+  "last_error": "'ksce_external' p1 요청 실패: timed out"
+ },
+ "aik_news": {
+  "consecutive_bad": 0,
+  "last_error": ""
+ },
+ "kira_news": {
+  "consecutive_bad": 1,
+  "last_error": ""
+ },
+ "g2b_construction": {
+  "consecutive_bad": 1,
+  "last_error": "나라장터 접근 불가 (direct·relay 모두 실패) — docs/setup-worker-relay.md 참조"
+ },
+ "g2b_engineering": {
+  "consecutive_bad": 1,
+  "last_error": "나라장터 접근 불가 (direct·relay 모두 실패) — docs/setup-worker-relay.md 참조"
+ }
+}
