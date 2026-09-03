@@ -73,6 +73,7 @@ def load_config(path: Path | str = Path("config/sources.yaml")) -> AppConfig:
         telegram_channel_url=site_raw.get("telegram_channel_url") or "",
     )
 
+    default_exclude = [str(k) for k in (defaults.get("keyword_exclude") or [])]
     sources: list[SourceConfig] = []
     seen_ids: set[str] = set()
     for entry in raw.get("sources") or []:
@@ -93,6 +94,9 @@ def load_config(path: Path | str = Path("config/sources.yaml")) -> AppConfig:
         # type별 옵션 블록: 키 이름은 type과 동일 (youtube_rss/youtube_api는 'youtube' 공용)
         opt_key = "youtube" if stype.startswith("youtube") else stype
         options = entry.get(opt_key) or {}
+        filters = dict(entry.get("filters") or {})
+        if default_exclude:  # 전역 제외어(부고·인사 등)를 소스별 제외어 앞에 병합
+            filters["keyword_exclude"] = default_exclude + list(filters.get("keyword_exclude") or [])
         sources.append(SourceConfig(
             id=sid,
             name=entry.get("name") or sid,
@@ -100,7 +104,7 @@ def load_config(path: Path | str = Path("config/sources.yaml")) -> AppConfig:
             category=category,
             enabled=bool(entry.get("enabled", True)),
             slots=list(slots),
-            filters=entry.get("filters") or {},
+            filters=filters,
             options=options,
             max_new_per_run=int(entry.get("max_new_per_run",
                                           defaults.get("max_new_per_run", 10))),

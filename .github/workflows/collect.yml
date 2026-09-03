@@ -11,9 +11,9 @@ on:
         description: 실행할 커맨드
         type: choice
         default: collect
-        options: [collect, verify-sources, smoke-g2b, blog-draft, build-site]
+        options: [collect, verify-sources, smoke-g2b, blog-draft, build-site, probe]
       sources:
-        description: 콤마 구분 소스 id 필터 (collect 전용, 비우면 전체)
+        description: "collect: 콤마 구분 소스 id 필터 / probe: 진단할 URL 또는 소스 id"
         required: false
       dry_run:
         description: dry-run (게시·상태 저장 없음)
@@ -78,7 +78,11 @@ jobs:
             [ -n "$INPUT_SOURCES" ] && ARGS="$ARGS --sources $INPUT_SOURCES"
             [ "$INPUT_DRY_RUN" = "true" ] && ARGS="$ARGS --dry-run"
           fi
-          python -m src.main "$CMD" $ARGS
+          if [ "$CMD" = "probe" ]; then
+            python -m src.main probe --target "$INPUT_SOURCES"
+          else
+            python -m src.main "$CMD" $ARGS
+          fi
 
       # 파이프라인이 실패해도 이미 게시된 상태(seen.db)는 반드시 커밋 — 중복 게시 방지
       - name: Commit state, drafts, site

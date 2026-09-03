@@ -32,7 +32,7 @@ def _day_range_utc(day: date) -> tuple[datetime, datetime]:
 def build_draft(store: SeenStore, day: date, *, use_llm: bool = True,
                 site_url: str = "") -> str:
     start, end = _day_range_utc(day)
-    items = store.posted_between(start, end)
+    items = store.posted_between(start, end) or store.collected_between(start, end, limit=40)
     by_category: dict[str, list[dict]] = {}
     for it in items:
         by_category.setdefault(it.get("category") or "news", []).append(it)

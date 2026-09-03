@@ -6,6 +6,8 @@
 defaults:
   timeout: 20
   max_new_per_run: 10
+  # 모든 소스에 공통 적용되는 제외어 (소스별 keyword_exclude와 합쳐짐)
+  keyword_exclude: ["[부고]", "[인사]", "[결혼]", "[동정]", "[부음]"]
 
 site:
   # GitHub Pages 주소 (저장소 공개 + Pages 활성화 후 실제 주소로 교체)
@@ -27,8 +29,7 @@ sources:
     rss:
       url: "https://www.ikld.kr/rss/allArticle.xml"
       id_pattern: "idxno=(\\d+)"
-    filters:
-      keyword_exclude: ["부고", "[인사]"]
+      verify_tls: false   # 실측: 서버가 중간 인증서를 보내지 않아 검증 실패 (2026-09)
 
   - id: conslove
     name: 한국건설신문
@@ -38,6 +39,7 @@ sources:
     rss:
       url: "https://www.conslove.co.kr/rss/allArticle.xml"
       id_pattern: "idxno=(\\d+)"
+      verify_tls: false   # 실측: 인증서가 www 호스트와 불일치 (2026-09)
 
   - id: engdaily
     name: 엔지니어링데일리
@@ -70,6 +72,7 @@ sources:
     name: 국토교통부 보도자료
     type: rss
     category: gov
+    enabled: false            # 실측 404 — 실제 피드 URL 확인 후 활성화 (Actions probe로 탐색)
     slots: [morning, evening]
     rss:
       url: "https://www.korea.kr/rss/dept_molit.xml"
@@ -82,6 +85,7 @@ sources:
     type: board
     category: committee
     slots: [morning, evening]
+    timeout: 45               # 실측: 20초 내 응답 없음 — 느린 서버
     board:
       list_url: "https://www.ksce.or.kr/not/Default.asp?gbn=10&ctop=MN0096&htop=MN0031&ptop=MN0031&page={page}"
       pages: 1

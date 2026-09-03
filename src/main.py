@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import re
 import sys
 from datetime import date, datetime, timedelta, timezone
 
@@ -19,7 +20,7 @@ from .collectors import narajangteo
 from .config import AppConfig, apply_keyword_filters, load_config
 from .dedup import SeenStore
 from .format_telegram import format_digest, format_item, link_preview_for
-from .httpio import redact_secrets
+from .httpio import decode_body, fetch_bytes, redact_secrets
 from .models import CATEGORY_META, Item
 from .report import SourceResult, render_report, update_health, verify_sources, write_github_summary
 from .site_build import build_site
@@ -326,6 +327,79 @@ def run_blog_draft(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_probe(args: argparse.Namespace) -> int:
+    """소스 튜닝용 진단: URL이면 응답·피드 링크·본문 앞부분, 소스 id면 셀렉터 매칭/수집 결과."""
+    target = (args.target or "").strip()
+    cfg = load_config()
+    out: list[str] = []
+    if not target:
+        print("probe --target 에 URL 또는 소스 id를 지정하세요")
+        return 2
+    if target.startswith(("http://", "https://")):
+        try:
+            content, charset = fetch_bytes(target, timeout=30, verify_tls=False)
+        except Exception as exc:  # noqa: BLE001
+            out.append(f"요청 실패: {redact_secrets(str(exc), cfg.secrets.values())}")
+        else:
+            text = decode_body(content, charset)
+            out.append(f"OK — {len(content)} bytes, charset={charset}")
+            links = re.findall(r"""(?:href|src)=["']([^"']+)""", text, re.I)
+            feeds = [l for l in dict.fromkeys(links) if re.search(r"rss|feed|\.xml", l, re.I)]
+            out.append("--- 피드/XML 링크 후보 ---")
+            out += feeds[:40] or ["(없음)"]
+            out.append("--- 본문 텍스트 앞부분 ---")
+            out.append(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", text))[:2500])
+            out.append("--- HTML 앞부분 ---")
+            out.append(text[:2500])
+    else:
+        source = next((s for s in cfg.sources if s.id == target), None)
+        if source is None:
+            print(f"소스 id '{target}' 없음. 사용 가능: {', '.join(s.id for s in cfg.sources)}")
+            return 2
+        ctx = _make_ctx(cfg, "morning")
+        ctx.advance_cursor = False
+        try:
+            if source.type == "board":
+                from bs4 import BeautifulSoup
+                o = source.options
+                url = str(o.get("list_url", "")).replace("{page}", "1")
+                method = (o.get("method") or "GET").upper()
+                data = ({k: str(v).replace("{page}", "1") for k, v in (o.get("form_data") or {}).items()}
+                        if method == "POST" else None)
+                content, charset = fetch_bytes(url, timeout=source.timeout, method=method, data=data,
+                                               verify_tls=bool(o.get("verify_tls", True)))
+                html = decode_body(content, charset, o.get("encoding", "auto"))
+                soup = BeautifulSoup(html, "html.parser")
+                rows = soup.select(o.get("row_selector", ""))
+                out.append(f"{url} → {len(content)} bytes, charset={charset}")
+                out.append(f"row_selector={o.get('row_selector')!r} → {len(rows)}행 매칭")
+                for row in rows[:3]:
+                    out.append("--- 매칭 행 ---")
+                    out.append(str(row)[:700])
+                if not rows:
+                    out.append(f"구조 힌트: table={len(soup.find_all('table'))} ul={len(soup.find_all('ul'))} "
+                               f"li={len(soup.find_all('li'))} a={len(soup.find_all('a'))}")
+                    out.append("--- a 태그 샘플 (최대 40) ---")
+                    for a in soup.find_all("a")[:40]:
+                        out.append(f"  href={a.get('href')!r} onclick={a.get('onclick')!r} "
+                                   f"class={a.get('class')!r} | {a.get_text(' ', strip=True)[:60]}")
+                    out.append("--- HTML 앞부분 ---")
+                    out.append(html[:3000])
+            else:
+                items = COLLECTORS[source.type](source, ctx)
+                out.append(f"{source.type} '{source.id}': {len(items)}건 수집")
+                for it in items[:10]:
+                    out.append(f"  {it.dedup_key} | {it.title[:70]} | {it.url}")
+        except Exception as exc:  # noqa: BLE001
+            out.append(f"실패: {redact_secrets(str(exc), cfg.secrets.values())}")
+        finally:
+            ctx.seen_store.close()
+    text = "\n".join(out)
+    print(text)
+    write_github_summary(f"# probe: {target}\n\n```\n{text[:60000]}\n```")
+    return 0
+
+
 def run_build_site(args: argparse.Namespace) -> int:  # noqa: ARG001
     cfg = load_config()
     store = SeenStore()
@@ -357,6 +431,10 @@ def main(argv: list[str] | None = None) -> int:
     p_draft.set_defaults(func=run_blog_draft)
 
     sub.add_parser("build-site", help="site/ 재생성").set_defaults(func=run_build_site)
+
+    p_probe = sub.add_parser("probe", help="소스 튜닝 진단: URL 응답/피드 링크 또는 소스 셀렉터 매칭 확인")
+    p_probe.add_argument("--target", help="URL(http...) 또는 sources.yaml의 소스 id")
+    p_probe.set_defaults(func=run_probe)
 
     args = parser.parse_args(argv)
     return args.func(args)

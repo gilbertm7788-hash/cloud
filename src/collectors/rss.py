@@ -61,8 +61,9 @@ def collect(source: SourceConfig, ctx: RunContext) -> list[Item]:
     url = source.options.get("url")
     if not url:
         raise CollectError(f"'{source.id}': rss.url 미설정")
+    verify_tls = bool(source.options.get("verify_tls", True))
     try:
-        content, _ = fetch_bytes(url, timeout=source.timeout)
+        content, _ = fetch_bytes(url, timeout=source.timeout, verify_tls=verify_tls)
     except Exception as exc:  # noqa: BLE001
         raise CollectError(f"'{source.id}' 피드 요청 실패: {exc}") from exc
     return parse_feed(content, source)

@@ -80,3 +80,24 @@ def test_repo_config_is_valid():
     cfg = load_config("config/sources.yaml")
     assert any(s.type == "rss" and s.enabled for s in cfg.sources)
     assert any(s.type == "narajangteo" for s in cfg.sources)
+
+
+def test_default_keyword_exclude_merged(tmp_path):
+    text = """
+defaults: {keyword_exclude: ["[부고]", "[인사]"]}
+sources:
+  - id: a
+    name: A
+    type: rss
+    category: news
+    rss: {url: "https://ex.com/rss.xml"}
+    filters: {keyword_exclude: ["채용"]}
+  - id: b
+    name: B
+    type: rss
+    category: news
+    rss: {url: "https://ex.com/rss2.xml"}
+"""
+    cfg = load_config(write(tmp_path, text))
+    assert cfg.sources[0].filters["keyword_exclude"] == ["[부고]", "[인사]", "채용"]
+    assert cfg.sources[1].filters["keyword_exclude"] == ["[부고]", "[인사]"]

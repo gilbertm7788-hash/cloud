@@ -74,3 +74,13 @@ def test_build_draft_empty_day(tmp_path):
     content = build_draft(store, day, use_llm=False)
     assert "게시된 콘텐츠가 없습니다" in content
     store.close()
+
+
+def test_draft_falls_back_to_collected_when_nothing_posted(tmp_path):
+    """텔레그램 미설정으로 게시분이 없어도 당일 수집분으로 초안이 만들어져야 함."""
+    store = SeenStore(tmp_path / "seen.db")
+    store.mark_seen(Item(source_id="ikld", category="news", title="수집만 된 뉴스",
+                         url="https://ex.com/n9", natural_key="9", key_prefix="rss:ikld"))
+    content = build_draft(store, datetime.now(KST).date(), use_llm=False)
+    assert "수집만 된 뉴스" in content
+    store.close()

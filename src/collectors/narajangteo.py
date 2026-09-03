@@ -191,8 +191,12 @@ def _row_to_item(row: dict, source: SourceConfig) -> Item | None:
 
 def smoke_test(ctx: RunContext, timeout: float = 12) -> str:
     """direct → relay 순서로 1건 조회 시도. 결과를 ctx.g2b_mode에 캐시."""
-    if ctx.g2b_mode in ("direct", "relay", "fail"):
+    if ctx.g2b_mode in ("direct", "relay", "fail", "nokey"):
         return ctx.g2b_mode
+    if not ctx.secrets.get("DATA_GO_KR_KEY"):
+        log.warning("DATA_GO_KR_KEY 미설정 — 나라장터 수집 건너뜀")
+        ctx.g2b_mode = "nokey"
+        return "nokey"
     import os
     forced = os.environ.get("G2B_MODE", "auto").lower()
     now = datetime.now(KST)
@@ -220,6 +224,8 @@ def smoke_test(ctx: RunContext, timeout: float = 12) -> str:
 
 def collect(source: SourceConfig, ctx: RunContext) -> list[Item]:
     mode = smoke_test(ctx)
+    if mode == "nokey":
+        raise CollectError("DATA_GO_KR_KEY 미등록 — docs/setup-datago.md 참조 (등록 전까지 입찰 수집 생략)")
     if mode == "fail":
         raise CollectError(
             "나라장터 접근 불가 (direct·relay 모두 실패) — docs/setup-worker-relay.md 참조"

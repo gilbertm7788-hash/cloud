@@ -174,7 +174,10 @@ def build_daily_post(store: SeenStore, site: SiteConfig, day: date | None = None
     day = day or _now_kst().date()
     start = datetime(day.year, day.month, day.day, tzinfo=KST)
     end = start + timedelta(days=1)
-    items = store.posted_between(start.astimezone(timezone.utc), end.astimezone(timezone.utc))
+    start_utc, end_utc = start.astimezone(timezone.utc), end.astimezone(timezone.utc)
+    items = store.posted_between(start_utc, end_utc)
+    if not items:  # 텔레그램 미설정 등으로 게시분이 없으면 당일 수집분으로 브리핑 구성
+        items = store.collected_between(start_utc, end_utc, limit=40)
     if not items:
         return None
     titles = [f"[{it.get('category')}] {it.get('title')}" for it in items]

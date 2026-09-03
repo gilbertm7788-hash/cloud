@@ -102,6 +102,15 @@ class SeenStore:
         ).fetchall()
         return [self._to_dict(r) for r in rows]
 
+    def collected_between(self, start: datetime, end: datetime, limit: int = 40) -> list[dict]:
+        """해당 기간에 처음 수집된 아이템 (failed 제외, 최신순). 게시 없이 사이트만 돌 때의 폴백."""
+        rows = self.conn.execute(
+            "SELECT * FROM seen WHERE first_seen_at >= ? AND first_seen_at < ? "
+            "AND status != 'failed' ORDER BY first_seen_at DESC LIMIT ?",
+            (_iso(start), _iso(end), limit),
+        ).fetchall()
+        return [self._to_dict(r) for r in rows]
+
     def recent(self, days: int = 90, statuses: tuple[str, ...] = ("posted", "seen")) -> list[dict]:
         cutoff = _iso(datetime.now(timezone.utc) - timedelta(days=days))
         ph = ",".join("?" * len(statuses))
