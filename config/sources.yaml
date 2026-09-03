@@ -84,8 +84,10 @@ sources:
     name: 대한토목학회 대외기관공고
     type: board
     category: committee
+    enabled: false            # 실측(2026-09): 45초에도 무응답 — GitHub 러너(해외 IP) 차단 추정.
+                              # 국내 IP 경유(릴레이/셀프호스티드 러너) 마련 시 재시도
     slots: [morning, evening]
-    timeout: 45               # 실측: 20초 내 응답 없음 — 느린 서버
+    timeout: 45
     board:
       list_url: "https://www.ksce.or.kr/not/Default.asp?gbn=10&ctop=MN0096&htop=MN0031&ptop=MN0031&page={page}"
       pages: 1
@@ -130,7 +132,10 @@ sources:
       id_pattern: "ba_id=(\\d+)"
       fields:
         title: {selector: "a", attr: text}
-        link: {selector: "a", attr: href}
+        # 실측(2026-09): href="javascript:fnReadArticle(264231);" → 글 번호로 상세 URL 조립
+        link: {selector: "a", attr: href, pattern: "fnReadArticle\\((\\d+)\\)",
+               template: "https://www.kira.or.kr/jsp/main/01/02.jsp?mode=read&ba_id={value}"}
+        date: {selector: "td:nth-of-type(4)", attr: text}
     filters:
       keyword_include: ["위원", "모집", "공모", "평가", "심의", "경관"]
 
