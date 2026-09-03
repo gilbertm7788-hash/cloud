@@ -327,77 +327,93 @@ def run_blog_draft(args: argparse.Namespace) -> int:
     return 0
 
 
+def _probe_url(url: str, cfg, out: list[str]) -> None:
+    try:
+        content, charset = fetch_bytes(url, timeout=30, verify_tls=False)
+    except Exception as exc:  # noqa: BLE001
+        out.append(f"요청 실패: {redact_secrets(str(exc), cfg.secrets.values())}")
+        return
+    text = decode_body(content, charset)
+    out.append(f"OK — {len(content)} bytes, charset={charset}")
+    links = re.findall(r"""(?:href|src)=["']([^"']+)""", text, re.I)
+    feeds = [l for l in dict.fromkeys(links) if re.search(r"rss|feed|\.xml", l, re.I)]
+    out.append("--- 피드/XML 링크 후보 ---")
+    out += feeds[:40] or ["(없음)"]
+    out.append("--- 본문 텍스트 앞부분 ---")
+    out.append(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", text))[:2500])
+    out.append("--- HTML 앞부분 ---")
+    out.append(text[:2500])
+
+
+def _probe_source(source, cfg, out: list[str]) -> None:
+    ctx = _make_ctx(cfg, "morning")
+    ctx.advance_cursor = False
+    try:
+        if source.type == "board":
+            from bs4 import BeautifulSoup
+            o = source.options
+            url = str(o.get("list_url", "")).replace("{page}", "1")
+            method = (o.get("method") or "GET").upper()
+            data = ({k: str(v).replace("{page}", "1") for k, v in (o.get("form_data") or {}).items()}
+                    if method == "POST" else None)
+            content, charset = fetch_bytes(url, timeout=source.timeout, method=method, data=data,
+                                           verify_tls=bool(o.get("verify_tls", True)))
+            html = decode_body(content, charset, o.get("encoding", "auto"))
+            soup = BeautifulSoup(html, "html.parser")
+            rows = soup.select(o.get("row_selector", ""))
+            out.append(f"{url} → {len(content)} bytes, charset={charset}")
+            out.append(f"row_selector={o.get('row_selector')!r} → {len(rows)}행 매칭")
+            for row in rows[:3]:
+                out.append("--- 매칭 행 ---")
+                out.append(str(row)[:700])
+            if not rows:
+                out.append(f"구조 힌트: table={len(soup.find_all('table'))} ul={len(soup.find_all('ul'))} "
+                           f"li={len(soup.find_all('li'))} a={len(soup.find_all('a'))}")
+                out.append("--- a 태그 샘플 (최대 40) ---")
+                for a in soup.find_all("a")[:40]:
+                    out.append(f"  href={a.get('href')!r} onclick={a.get('onclick')!r} "
+                               f"class={a.get('class')!r} | {a.get_text(' ', strip=True)[:60]}")
+                out.append("--- HTML 앞부분 ---")
+                out.append(html[:3000])
+        else:
+            items = COLLECTORS[source.type](source, ctx)
+            out.append(f"{source.type} '{source.id}': {len(items)}건 수집")
+            for it in items[:10]:
+                out.append(f"  {it.dedup_key} | {it.title[:70]} | {it.url}")
+    except Exception as exc:  # noqa: BLE001
+        out.append(f"실패: {redact_secrets(str(exc), cfg.secrets.values())}")
+    finally:
+        ctx.seen_store.close()
+
+
 def run_probe(args: argparse.Namespace) -> int:
-    """소스 튜닝용 진단: URL이면 응답·피드 링크·본문 앞부분, 소스 id면 셀렉터 매칭/수집 결과."""
-    target = (args.target or "").strip()
+    """소스 튜닝용 진단: URL이면 응답·피드 링크·본문 앞부분, 소스 id면 셀렉터 매칭/수집 결과.
+
+    콤마로 여러 대상을 한 번에 지정할 수 있다 (URL 후보 여러 개를 한 실행으로 시험).
+    """
+    targets = [t.strip() for t in (args.target or "").split(",") if t.strip()]
+    if not targets:
+        print("probe --target 에 URL 또는 소스 id를 지정하세요 (콤마로 여러 개 가능)")
+        return 2
     cfg = load_config()
     out: list[str] = []
-    if not target:
-        print("probe --target 에 URL 또는 소스 id를 지정하세요")
-        return 2
-    if target.startswith(("http://", "https://")):
-        try:
-            content, charset = fetch_bytes(target, timeout=30, verify_tls=False)
-        except Exception as exc:  # noqa: BLE001
-            out.append(f"요청 실패: {redact_secrets(str(exc), cfg.secrets.values())}")
-        else:
-            text = decode_body(content, charset)
-            out.append(f"OK — {len(content)} bytes, charset={charset}")
-            links = re.findall(r"""(?:href|src)=["']([^"']+)""", text, re.I)
-            feeds = [l for l in dict.fromkeys(links) if re.search(r"rss|feed|\.xml", l, re.I)]
-            out.append("--- 피드/XML 링크 후보 ---")
-            out += feeds[:40] or ["(없음)"]
-            out.append("--- 본문 텍스트 앞부분 ---")
-            out.append(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", text))[:2500])
-            out.append("--- HTML 앞부분 ---")
-            out.append(text[:2500])
-    else:
+    rc = 0
+    for target in targets:
+        if len(targets) > 1:
+            out.append(f"\n===== {target} =====")
+        if target.startswith(("http://", "https://")):
+            _probe_url(target, cfg, out)
+            continue
         source = next((s for s in cfg.sources if s.id == target), None)
         if source is None:
-            print(f"소스 id '{target}' 없음. 사용 가능: {', '.join(s.id for s in cfg.sources)}")
-            return 2
-        ctx = _make_ctx(cfg, "morning")
-        ctx.advance_cursor = False
-        try:
-            if source.type == "board":
-                from bs4 import BeautifulSoup
-                o = source.options
-                url = str(o.get("list_url", "")).replace("{page}", "1")
-                method = (o.get("method") or "GET").upper()
-                data = ({k: str(v).replace("{page}", "1") for k, v in (o.get("form_data") or {}).items()}
-                        if method == "POST" else None)
-                content, charset = fetch_bytes(url, timeout=source.timeout, method=method, data=data,
-                                               verify_tls=bool(o.get("verify_tls", True)))
-                html = decode_body(content, charset, o.get("encoding", "auto"))
-                soup = BeautifulSoup(html, "html.parser")
-                rows = soup.select(o.get("row_selector", ""))
-                out.append(f"{url} → {len(content)} bytes, charset={charset}")
-                out.append(f"row_selector={o.get('row_selector')!r} → {len(rows)}행 매칭")
-                for row in rows[:3]:
-                    out.append("--- 매칭 행 ---")
-                    out.append(str(row)[:700])
-                if not rows:
-                    out.append(f"구조 힌트: table={len(soup.find_all('table'))} ul={len(soup.find_all('ul'))} "
-                               f"li={len(soup.find_all('li'))} a={len(soup.find_all('a'))}")
-                    out.append("--- a 태그 샘플 (최대 40) ---")
-                    for a in soup.find_all("a")[:40]:
-                        out.append(f"  href={a.get('href')!r} onclick={a.get('onclick')!r} "
-                                   f"class={a.get('class')!r} | {a.get_text(' ', strip=True)[:60]}")
-                    out.append("--- HTML 앞부분 ---")
-                    out.append(html[:3000])
-            else:
-                items = COLLECTORS[source.type](source, ctx)
-                out.append(f"{source.type} '{source.id}': {len(items)}건 수집")
-                for it in items[:10]:
-                    out.append(f"  {it.dedup_key} | {it.title[:70]} | {it.url}")
-        except Exception as exc:  # noqa: BLE001
-            out.append(f"실패: {redact_secrets(str(exc), cfg.secrets.values())}")
-        finally:
-            ctx.seen_store.close()
+            out.append(f"소스 id '{target}' 없음. 사용 가능: {', '.join(s.id for s in cfg.sources)}")
+            rc = 2
+            continue
+        _probe_source(source, cfg, out)
     text = "\n".join(out)
     print(text)
-    write_github_summary(f"# probe: {target}\n\n```\n{text[:60000]}\n```")
-    return 0
+    write_github_summary(f"# probe: {', '.join(targets)}\n\n```\n{text[:60000]}\n```")
+    return rc
 
 
 def run_build_site(args: argparse.Namespace) -> int:  # noqa: ARG001
