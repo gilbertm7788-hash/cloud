@@ -45,6 +45,13 @@ python -m src.main build-site            # site/ 재생성
 2. `python -m src.main verify-sources`로 실제 응답·파싱 확인
 3. 확인되면 `enabled: true`로 커밋
 
+### 셀렉터·피드 URL이 안 맞을 때: `probe`
+Actions 탭 → collect → Run workflow → command **probe**, sources 칸에 대상 입력 → Summary 탭에서 결과 확인
+- **소스 id** (예: `kira_news`): 게시판이면 `row_selector` 매칭 행 수와 매칭된 행 HTML, 0행이면 페이지의
+  `<a>` 태그 샘플 40개를 보여줘 올바른 셀렉터를 찾을 수 있음. RSS/API 소스면 수집 결과 10건 미리보기
+- **URL** (예: `https://www.korea.kr/etc/rss.do`): 응답 크기·인코딩, 페이지 안의 RSS/XML 링크 후보, 본문 앞부분
+- 로컬에서는 `python -m src.main probe --target <id 또는 URL>` (한국 사이트가 막힌 환경에서는 Actions 사용)
+
 ## 운영 원칙
 - 텔레그램 시크릿이 없으면 게시만 건너뛰고 수집·사이트 빌드는 계속됩니다 (실행 결과는 Actions Summary 탭)
 - 텔레그램: 스테이징 채널 검토 → 메인 채널 전달 시 **"보낸 사람 이름 숨기기"**
