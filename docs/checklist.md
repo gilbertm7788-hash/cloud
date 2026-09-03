@@ -14,14 +14,18 @@
 ## 2. GitHub 설정 (필수)
 - [ ] 저장소를 **Public**으로 전환 (무료 GitHub Pages 조건 — API 키는 전부 Secrets라 코드 공개 무방)
 - [ ] Settings → Pages → Source를 **GitHub Actions**로 설정
-- [ ] 이 브랜치를 기본 브랜치에 병합 — **cron 자동 실행은 기본 브랜치의 워크플로만 동작**
-  (병합 전에는 Actions 탭 → collect → Run workflow로 수동 실행)
+  (설정 전까지는 매 실행의 Summary 탭에 "Pages 미설정" 안내만 뜨고 배포는 건너뜀)
 - [ ] `config/sources.yaml`의 `site.base_url`을 실제 Pages 주소로 확인/수정
+
+> ℹ️ cron(07:30 / 12:00 / 18:30 KST)은 **이미 돌고 있습니다** — 이 브랜치가 저장소의 기본 브랜치입니다.
+> 텔레그램 시크릿을 등록하기 전까지는 게시만 건너뛰고 수집·사이트 빌드만 수행합니다
+> (Actions → 해당 실행 → Summary 탭에서 소스별 결과 확인 가능).
 
 ## 3. 첫 실행 (필수)
 - [ ] Actions 탭 → collect → Run workflow → command: **verify-sources** 실행
   → Summary에서 소스별 성공/실패 확인. 실패한 소스는 `sources.yaml`에서 `enabled: false`로 끄거나 셀렉터 조정
-- [ ] command: **collect** 실행 → 스테이징 채널에 뉴스가 게시되는지 확인
+- [ ] 텔레그램 시크릿 등록 후 command: **collect** 실행 → 스테이징 채널에 뉴스가 게시되는지 확인
+  (시크릿 등록 이전에 수집된 항목은 사이트에만 실리고 텔레그램으로는 소급 게시되지 않음 — 정상)
 - [ ] 한 번 더 실행 → 중복 게시가 없는지 확인 (신규 0건이어야 정상)
 
 ## 4. 나라장터 입찰공고 — [상세: setup-datago.md](setup-datago.md)
