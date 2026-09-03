@@ -37,9 +37,9 @@ sources:
     category: news
     slots: [morning, evening]
     rss:
-      url: "https://www.conslove.co.kr/rss/allArticle.xml"
+      # 실측(2026-09): https는 인증서 불일치 + 다른 vhost(404). 피드는 평문 http로만 제공됨
+      url: "http://www.conslove.co.kr/rss/allArticle.xml"
       id_pattern: "idxno=(\\d+)"
-      verify_tls: false   # 실측: 인증서가 www 호스트와 불일치 (2026-09)
 
   - id: engdaily
     name: 엔지니어링데일리
@@ -68,14 +68,33 @@ sources:
       url: "https://www.constimes.co.kr/rss/allArticle.xml"
       id_pattern: "idxno=(\\d+)"
 
+  # 실측(2026-09): 국토부 RSS 목록 https://www.molit.go.kr/USR/p_etc_rsssvc/m_123/ers.jsp
+  #   rss_id=NEWS 보도자료 / N01_B 고시·공고 / N04_B 자격시험 / INSA 인사 / tender 입찰공고
+  #   첫 요청이 307(보안 리다이렉트) 후 200 — 간헐적으로 느려 timeout 넉넉히
   - id: molit
     name: 국토교통부 보도자료
     type: rss
     category: gov
-    enabled: false            # 실측 404 — 실제 피드 URL 확인 후 활성화 (Actions probe로 탐색)
     slots: [morning, evening]
+    timeout: 40
     rss:
-      url: "https://www.korea.kr/rss/dept_molit.xml"
+      url: "https://www.molit.go.kr/dev/board/board_rss.jsp?rss_id=NEWS"
+      id_pattern: "id=(\\d+)"
+    filters:
+      keyword_exclude: ["[장관동정]", "[차관동정]"]
+
+  - id: molit_notice
+    name: 국토교통부 고시·공고
+    type: rss
+    category: committee
+    slots: [morning]
+    timeout: 40
+    rss:
+      url: "https://www.molit.go.kr/dev/board/board_rss.jsp?rss_id=N01_B"
+      id_pattern: "idx=(\\d+)"
+    filters:
+      # 고시·공고 전체는 잡음이 많아(지구 지정, 인가 공고 등) 위원·공모 관련만 통과
+      keyword_include: ["위원", "모집", "공모", "자문"]
 
   # ---------------------------------------------------------------------------
   # 🏛 협회·학회 게시판 (Phase 2) — 셀렉터는 verify-sources로 실측 후 조정
