@@ -49,7 +49,7 @@ python -m src.main build-site            # site/ 재생성
 Actions 탭 → collect → Run workflow → command **probe**, sources 칸에 대상 입력 → Summary 탭에서 결과 확인
 - **소스 id** (예: `kira_news`): 게시판이면 `row_selector` 매칭 행 수와 매칭된 행 HTML, 0행이면 페이지의
   `<a>` 태그 샘플 40개를 보여줘 올바른 셀렉터를 찾을 수 있음. RSS/API 소스면 수집 결과 10건 미리보기
-- **URL** (예: `https://www.korea.kr/etc/rss.do`): 응답 크기·인코딩, 페이지 안의 RSS/XML 링크 후보, 본문 앞부분
+- **URL** (예: `https://www.molit.go.kr/USR/p_etc_rsssvc/m_123/ers.jsp`): 응답 크기·인코딩, 페이지 안의 RSS/XML 링크 후보, 본문 앞부분
 - 콤마로 여러 대상을 한 번에 지정 가능 (예: `https://a.com/rss.xml,https://a.com/feed`) — URL 후보를 한 실행으로 시험
 - 로컬에서는 `python -m src.main probe --target <id 또는 URL>` (한국 사이트가 막힌 환경에서는 Actions 사용)
 
