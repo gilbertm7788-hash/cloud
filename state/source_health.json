@@ -1,11 +1,11 @@
 {
  "ikld": {
-  "consecutive_bad": 1,
-  "last_error": "'ikld' 피드 요청 실패: [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1010)"
+  "consecutive_bad": 0,
+  "last_error": ""
  },
  "conslove": {
-  "consecutive_bad": 1,
-  "last_error": "'conslove' 피드 요청 실패: [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: Hostname mismatch, certificate is not valid for 'www.conslove.co.kr'. (_ssl.c:1010)"
+  "consecutive_bad": 0,
+  "last_error": ""
  },
  "engdaily": {
   "consecutive_bad": 0,
@@ -20,8 +20,8 @@
   "last_error": ""
  },
  "molit": {
-  "consecutive_bad": 1,
-  "last_error": "'molit' 피드 요청 실패: Client error '404 Not Found' for url 'https://www.korea.kr/rss/dept_molit.xml'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404"
+  "consecutive_bad": 0,
+  "last_error": ""
  },
  "ksce_external": {
   "consecutive_bad": 1,
@@ -32,15 +32,19 @@
   "last_error": ""
  },
  "kira_news": {
-  "consecutive_bad": 1,
+  "consecutive_bad": 0,
   "last_error": ""
  },
  "g2b_construction": {
-  "consecutive_bad": 1,
-  "last_error": "나라장터 접근 불가 (direct·relay 모두 실패) — docs/setup-worker-relay.md 참조"
+  "consecutive_bad": 2,
+  "last_error": "DATA_GO_KR_KEY 미등록 — docs/setup-datago.md 참조 (등록 전까지 입찰 수집 생략)"
  },
  "g2b_engineering": {
-  "consecutive_bad": 1,
-  "last_error": "나라장터 접근 불가 (direct·relay 모두 실패) — docs/setup-worker-relay.md 참조"
+  "consecutive_bad": 2,
+  "last_error": "DATA_GO_KR_KEY 미등록 — docs/setup-datago.md 참조 (등록 전까지 입찰 수집 생략)"
+ },
+ "molit_notice": {
+  "consecutive_bad": 0,
+  "last_error": ""
  }
 }
