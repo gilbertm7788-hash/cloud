@@ -20,8 +20,8 @@
   "last_error": ""
  },
  "molit": {
-  "consecutive_bad": 2,
-  "last_error": "'molit' 피드 요청 실패: timed out"
+  "consecutive_bad": 0,
+  "last_error": ""
  },
  "ksce_external": {
   "consecutive_bad": 1,
@@ -36,11 +36,11 @@
   "last_error": ""
  },
  "g2b_construction": {
-  "consecutive_bad": 4,
+  "consecutive_bad": 5,
   "last_error": "DATA_GO_KR_KEY 미등록 — docs/setup-datago.md 참조 (등록 전까지 입찰 수집 생략)"
  },
  "g2b_engineering": {
-  "consecutive_bad": 4,
+  "consecutive_bad": 5,
   "last_error": "DATA_GO_KR_KEY 미등록 — docs/setup-datago.md 참조 (등록 전까지 입찰 수집 생략)"
  },
  "molit_notice": {
