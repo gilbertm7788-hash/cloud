@@ -36,11 +36,11 @@
   "last_error": ""
  },
  "g2b_construction": {
-  "consecutive_bad": 10,
+  "consecutive_bad": 11,
   "last_error": "DATA_GO_KR_KEY 미등록 — docs/setup-datago.md 참조 (등록 전까지 입찰 수집 생략)"
  },
  "g2b_engineering": {
-  "consecutive_bad": 10,
+  "consecutive_bad": 11,
   "last_error": "DATA_GO_KR_KEY 미등록 — docs/setup-datago.md 참조 (등록 전까지 입찰 수집 생략)"
  },
  "molit_notice": {
