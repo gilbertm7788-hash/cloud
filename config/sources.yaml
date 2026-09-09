@@ -12,10 +12,9 @@ defaults:
 site:
   # GitHub Pages 주소 (저장소 공개 + Pages 활성화 후 실제 주소로 교체)
   base_url: "https://gilbertm7788-hash.github.io/cloud"
-  title: "건설 인사이트"
+  title: "라벤더"
   description: "건설·토목·건축 뉴스, 입찰공고, 위원회 모집 큐레이션 아카이브"
-  # 공개 텔레그램 채널 개설 후 채워넣기 (예: https://t.me/xxxx). 비우면 버튼 미표시.
-  telegram_channel_url: ""
+  telegram_channel_url: "https://t.me/lavender_kr"
 
 sources:
   # ---------------------------------------------------------------------------
