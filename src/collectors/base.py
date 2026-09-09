@@ -18,4 +18,5 @@ class RunContext:
     secrets: dict[str, str] = field(default_factory=dict)
     site: SiteConfig = field(default_factory=SiteConfig)
     g2b_mode: str | None = None  # smoke_test 결과 캐시: direct | relay | fail
+    g2b_errors: list[str] = field(default_factory=list)  # smoke_test 실패 사유 (진단용)
     advance_cursor: bool = True  # False면 증분 수집 워터마크를 이동하지 않음 (verify/dry-run)

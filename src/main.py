@@ -307,11 +307,31 @@ def run_verify(args: argparse.Namespace) -> int:  # noqa: ARG001
     return 0 if ok else 1
 
 
+_G2B_HINTS = {
+    "nokey": "DATA_GO_KR_KEY 미등록 — docs/setup-datago.md 참조",
+    "direct": "GitHub 러너에서 나라장터에 직접 접속됩니다. 추가 설정 없이 입찰 수집이 동작합니다.",
+    "relay": "직접 접속은 막혔지만 릴레이 경유로 성공했습니다. 현 설정 유지.",
+    "fail": (
+        "나라장터 접속 실패. 아래 사유를 확인하세요.\n"
+        "- 키 발급 직후라면 서버 동기화에 최대 1시간이 걸립니다. 잠시 뒤 재시도\n"
+        "- 한국 IP(브라우저)에서는 되는데 여기서만 실패하면 GitHub 러너 IP 차단입니다. "
+        "docs/setup-worker-relay.md 대로 Cloudflare Worker 릴레이를 배포하고 "
+        "G2B_RELAY_URL·G2B_RELAY_SECRET을 등록하세요."
+    ),
+}
+
+
 def run_smoke_g2b(args: argparse.Namespace) -> int:  # noqa: ARG001
     cfg = load_config()
     ctx = _make_ctx(cfg, "morning")
     mode = narajangteo.smoke_test(ctx)
     print(f"g2b mode: {mode}")
+    lines = [f"# smoke-g2b 결과: `{mode}`", "", _G2B_HINTS.get(mode, "")]
+    if ctx.g2b_errors:
+        lines += ["", "## 실패 사유", *(f"- {e}" for e in ctx.g2b_errors)]
+    for e in ctx.g2b_errors:
+        print(e)
+    write_github_summary("\n".join(lines))
     ctx.seen_store.close()
     return 0 if mode in ("direct", "relay") else 2
 
