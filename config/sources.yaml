@@ -10,8 +10,8 @@ defaults:
   keyword_exclude: ["[부고]", "[인사]", "[결혼]", "[동정]", "[부음]"]
 
 site:
-  # GitHub Pages 주소 (저장소 공개 + Pages 활성화 후 실제 주소로 교체)
-  base_url: "https://lavender-kr-official.github.io/cloud"
+  # GitHub Pages 주소 — 저장소명이 <org>.github.io 라 루트에서 서비스됨 (경로 없음)
+  base_url: "https://lavender-kr-official.github.io"
   title: "라벤더"
   description: "건설·토목·건축 뉴스, 입찰공고, 위원회 모집 큐레이션 아카이브"
   telegram_channel_url: "https://t.me/lavender_kr"
