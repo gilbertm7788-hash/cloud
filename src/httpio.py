@@ -123,7 +123,11 @@ def fetch_via_curl(url: str, *, headers: dict | None = None, timeout: float = 30
     proc = subprocess.run(cmd, capture_output=True, timeout=timeout + 10)
     if proc.returncode != 0:
         stderr = proc.stderr.decode("utf-8", errors="replace")[:300]
-        raise RuntimeError(f"curl exit {proc.returncode}: {stderr}")
+        # --fail-with-body 덕분에 HTTP 4xx/5xx여도 응답 본문이 stdout에 남는다.
+        # 차단 페이지인지 API 레벨 오류인지는 이 본문에만 드러나므로 함께 올린다.
+        body = re.sub(r"\s+", " ", proc.stdout.decode("utf-8", errors="replace")).strip()[:300]
+        detail = f"{stderr} | 응답본문: {body}" if body else stderr
+        raise RuntimeError(f"curl exit {proc.returncode}: {detail}")
     return proc.stdout
 
 

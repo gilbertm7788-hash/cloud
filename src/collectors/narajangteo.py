@@ -217,7 +217,7 @@ def smoke_test(ctx: RunContext, timeout: float = 12) -> str:
             log.info("g2b smoke: %s OK", mode)
             return mode
         except CollectError as exc:
-            reason = redact_secrets(str(exc), ctx.secrets.values())[:400]
+            reason = redact_secrets(str(exc), ctx.secrets.values())[:700]
             log.warning("g2b smoke %s 실패: %s", mode, reason)
             ctx.g2b_errors.append(f"{mode}: {reason}")
     if not any(m == "relay" for m in candidates) or not ctx.secrets.get("G2B_RELAY_URL"):
