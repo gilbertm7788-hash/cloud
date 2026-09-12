@@ -1,16 +1,17 @@
 """건설 관련 종목 시세 — 다이제스트 머리에 붙는 시황 한 토막.
 
-국내는 공공데이터포털(금융위원회_주식시세정보), 미국은 Stooq CSV를 쓴다.
-둘 다 전일 종가 기준이다. 아침 7시 30분에 보내는 다이제스트에는 장중 시세가
-아니라 '어제 장이 어떻게 끝났나'가 맞는 정보다.
+국내는 공공데이터포털(금융위원회_주식시세정보), 미국은 Finnhub를 쓴다.
+아침 7시 30분에 보내는 다이제스트에는 장중 시세가 아니라 '직전 장이 어떻게
+끝났나'가 맞는 정보다 — 국내는 전일 종가, 미국은 그날 새벽에 끝난 정규장이다.
+
+미국 시세로 Stooq(키 불필요)를 먼저 썼으나 GitHub 러너에서 봇 차단 페이지가
+돌아온다(실측 2026-09). 차단을 우회하는 대신 무료 API 키를 쓰기로 했다.
 
 시세는 부가 정보다. 못 받아온 종목은 조용히 빠지고, 전부 실패하면 섹션이
 통째로 사라진다 — 주가 때문에 공고·뉴스 배달이 멈추면 안 된다.
 """
 from __future__ import annotations
 
-import csv
-import io
 import json
 import logging
 from dataclasses import dataclass
@@ -25,8 +26,9 @@ KST = timezone(timedelta(hours=9))
 
 KRX_URL = ("https://apis.data.go.kr/1160100/service/GetStockSecuritiesInfoService"
            "/getStockPriceInfo")
-STOOQ_URL = "https://stooq.com/q/d/l/"
-# 연휴·주말을 건너뛰고 최근 거래일을 찾기 위한 조회 구간 (설·추석 연휴 최장 5일)
+FINNHUB_URL = "https://finnhub.io/api/v1/quote"
+# 국내 시세는 날짜 지정 조회라, 연휴·주말을 건너뛰고 최근 거래일을 찾을 구간이 필요하다
+# (설·추석 연휴가 가장 길다)
 LOOKBACK_DAYS = 12
 
 
@@ -111,46 +113,34 @@ def fetch_kr(tickers: list[dict], service_key: str, timeout: float = 20,
     return quotes
 
 
-# ── 미국: Stooq 일별 CSV (키 불필요) ─────────────────────────────────────────
-# 시세 스냅샷 API는 전일 종가를 주지 않아 등락률을 계산할 수 없다.
-# 일별 CSV를 짧은 구간으로 받아 마지막 두 거래일을 비교한다.
+# ── 미국: Finnhub /quote (무료 키, 분당 60회) ────────────────────────────────
+# 한 번 호출로 현재가와 전일 종가가 같이 오므로 등락률을 바로 계산할 수 있다.
+# FINNHUB_API_KEY가 없으면 미국 구간만 조용히 빠진다.
 
-def _stooq_quote(symbol: str, name: str, timeout: float) -> Quote | None:
-    today = datetime.now(timezone.utc).date()
-    params = {
-        "s": f"{symbol.lower()}.us",
-        "d1": (today - timedelta(days=LOOKBACK_DAYS)).strftime("%Y%m%d"),
-        "d2": today.strftime("%Y%m%d"),
-        "i": "d",
-    }
-    content, _ = fetch_bytes(f"{STOOQ_URL}?{urlencode(params)}", timeout=timeout, retries=1)
-    text = content.decode("utf-8", errors="replace")
-    header = text.splitlines()[0] if text.splitlines() else ""
-    if not header.startswith("Date"):
-        # 한도 초과·심볼 없음 등은 CSV가 아닌 안내 문구로 돌아온다
-        raise RuntimeError(f"CSV 아님: {text[:120]}")
-    rows = [r for r in csv.DictReader(io.StringIO(text)) if r.get("Close")]
-    if not rows:
-        return None
-    last = rows[-1]
-    close = _to_float(last.get("Close"))
-    if close is None:
-        return None
-    change = None
-    if len(rows) >= 2:
-        prev = _to_float(rows[-2].get("Close"))
-        if prev:
-            change = (close - prev) / prev * 100
+def _finnhub_quote(symbol: str, name: str, api_key: str, timeout: float) -> Quote | None:
+    url = f"{FINNHUB_URL}?{urlencode({'symbol': symbol.upper(), 'token': api_key})}"
+    content, _ = fetch_bytes(url, timeout=timeout, retries=1)
+    body = json.loads(content.decode("utf-8", errors="replace"))
+    if isinstance(body, dict) and body.get("error"):
+        raise RuntimeError(str(body["error"])[:200])
+    close = _to_float(body.get("c"))
+    if not close:  # 없는 심볼은 200 OK에 전부 0으로 온다
+        raise RuntimeError(f"시세 없음(심볼 확인): {symbol}")
+    change = _to_float(body.get("dp"))
     as_of = None
-    try:
-        as_of = datetime.strptime(str(last.get("Date")), "%Y-%m-%d").date()
-    except (TypeError, ValueError):
-        pass
+    stamp = _to_float(body.get("t"))
+    if stamp:
+        as_of = datetime.fromtimestamp(stamp, tz=timezone.utc).astimezone(KST).date()
     return Quote(name=name, close=close, change_pct=change, as_of=as_of, currency="USD")
 
 
-def fetch_us(tickers: list[dict], timeout: float = 20,
+def fetch_us(tickers: list[dict], api_key: str = "", timeout: float = 20,
              errors: list[str] | None = None) -> list[Quote]:
+    if not api_key:
+        log.info("FINNHUB_API_KEY 없음 — 미국 시세 생략")
+        if errors is not None:
+            errors.append("미국: FINNHUB_API_KEY 미설정 (docs/setup-datago.md)")
+        return []
     quotes: list[Quote] = []
     for t in tickers:
         symbol = str(t.get("symbol") or "").strip()
@@ -158,7 +148,7 @@ def fetch_us(tickers: list[dict], timeout: float = 20,
         if not symbol:
             continue
         try:
-            q = _stooq_quote(symbol, name, timeout)
+            q = _finnhub_quote(symbol, name, api_key, timeout)
         except Exception as exc:  # noqa: BLE001
             log.warning("미국 시세 실패 %s: %s", symbol, str(exc)[:200])
             if errors is not None:
@@ -179,5 +169,6 @@ def fetch_quotes(cfg: dict, secrets: dict, timeout: float = 20,
     if not cfg or not cfg.get("enabled", True):
         return [], []
     kr = fetch_kr(list(cfg.get("kr") or []), secrets.get("DATA_GO_KR_KEY", ""), timeout, errors)
-    us = fetch_us(list(cfg.get("us") or []), timeout, errors)
+    us = fetch_us(list(cfg.get("us") or []), secrets.get("FINNHUB_API_KEY", ""),
+                  timeout, errors)
     return kr, us

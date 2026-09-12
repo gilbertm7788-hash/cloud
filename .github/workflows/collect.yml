@@ -42,6 +42,7 @@ jobs:
       TELEGRAM_STAGING_CHAT_ID: ${{ secrets.TELEGRAM_STAGING_CHAT_ID }}
       TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
       DATA_GO_KR_KEY: ${{ secrets.DATA_GO_KR_KEY }}
+      FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
       G2B_RELAY_URL: ${{ secrets.G2B_RELAY_URL }}
       G2B_RELAY_SECRET: ${{ secrets.G2B_RELAY_SECRET }}
       NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}

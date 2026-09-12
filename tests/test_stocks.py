@@ -61,30 +61,50 @@ def test_no_key_means_no_domestic_quotes(monkeypatch):
     assert not called
 
 
-def test_stooq_computes_change_from_last_two_sessions(monkeypatch):
-    csv_text = ("Date,Open,High,Low,Close,Volume\n"
-                "2026-09-10,400,410,399,400.00,100\n"
-                "2026-09-11,401,415,400,412.00,120\n")
-    monkeypatch.setattr(stocks, "fetch_bytes", lambda url, **kw: (csv_text.encode(), "utf-8"))
-    q = stocks._stooq_quote("CAT", "캐터필러", 10)
+def _finnhub(body):
+    import json
+    return json.dumps(body).encode(), "utf-8"
+
+
+def test_finnhub_quote_carries_price_and_change(monkeypatch):
+    monkeypatch.setattr(stocks, "fetch_bytes", lambda url, **kw: _finnhub(
+        {"c": 412.0, "d": 12.0, "dp": 3.0, "pc": 400.0, "t": 1789171200}))
+    q = stocks._finnhub_quote("CAT", "캐터필러", "KEY", 10)
     assert q.close == 412.0
     assert q.change_pct == pytest.approx(3.0)
-    assert q.as_of == date(2026, 9, 11)
     assert q.currency == "USD"
+    assert q.as_of is not None
 
 
-def test_stooq_single_session_leaves_change_unknown(monkeypatch):
-    csv_text = "Date,Open,High,Low,Close,Volume\n2026-09-11,401,415,400,412.00,120\n"
-    monkeypatch.setattr(stocks, "fetch_bytes", lambda url, **kw: (csv_text.encode(), "utf-8"))
-    assert stocks._stooq_quote("CAT", "캐터필러", 10).change_pct is None
-
-
-def test_stooq_non_csv_response_is_an_error(monkeypatch):
-    """한도 초과·없는 심볼은 200 OK에 안내 문구로 돌아온다 — 조용히 통과하면 안 된다."""
-    monkeypatch.setattr(stocks, "fetch_bytes",
-                        lambda url, **kw: (b"Exceeded the daily hits limit", "utf-8"))
+def test_unknown_symbol_comes_back_as_zeros_not_an_error(monkeypatch):
+    """없는 심볼도 200 OK에 전부 0으로 온다 — 0원짜리 종목을 싣지 않아야 한다."""
+    monkeypatch.setattr(stocks, "fetch_bytes", lambda url, **kw: _finnhub(
+        {"c": 0, "d": None, "dp": None, "pc": 0, "t": 0}))
     with pytest.raises(RuntimeError):
-        stocks._stooq_quote("CAT", "캐터필러", 10)
+        stocks._finnhub_quote("NOPE", "없음", "KEY", 10)
+
+
+def test_finnhub_error_payload_raises(monkeypatch):
+    monkeypatch.setattr(stocks, "fetch_bytes",
+                        lambda url, **kw: _finnhub({"error": "Invalid API key"}))
+    with pytest.raises(RuntimeError):
+        stocks._finnhub_quote("CAT", "캐터필러", "KEY", 10)
+
+
+def test_no_us_key_means_no_us_quotes(monkeypatch):
+    monkeypatch.setattr(stocks, "fetch_bytes", lambda *a, **k: pytest.fail("호출되면 안 됨"))
+    assert stocks.fetch_us([{"symbol": "CAT", "name": "캐터필러"}], "") == []
+
+
+def test_one_bad_us_ticker_does_not_sink_the_rest(monkeypatch):
+    def fake(url, **kw):
+        if "symbol=CAT" in url:
+            raise RuntimeError("429 rate limit")
+        return _finnhub({"c": 300.0, "dp": -1.0, "t": 1789171200})
+    monkeypatch.setattr(stocks, "fetch_bytes", fake)
+    got = stocks.fetch_us([{"symbol": "CAT", "name": "캐터필러"},
+                           {"symbol": "PWR", "name": "콴타서비스"}], "KEY")
+    assert [q.name for q in got] == ["콴타서비스"]
 
 
 def test_disabled_config_skips_everything(monkeypatch):
