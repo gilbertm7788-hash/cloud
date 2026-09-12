@@ -1,7 +1,10 @@
 """텔레그램 메시지 포맷팅 — 하루치를 한 통으로 묶는 일간 다이제스트."""
 from __future__ import annotations
 
+import re
+
 from .models import Item
+from .topics import classify, topic_order
 
 TG_LIMIT = 4096  # 텔레그램 메시지 한도 (참고용, 실제 경계는 SAFE_LIMIT)
 SAFE_LIMIT = 4000  # 여유분
@@ -40,14 +43,47 @@ WEEKDAYS = ("월", "화", "수", "목", "금", "토", "일")
 # 섹션 순서 = 독자 가치 순. 위원회 모집은 다른 데서 찾기 어려운 정보라 맨 앞.
 DIGEST_SECTIONS = (
     ("committee", "👥 위원회 모집", None),
-    ("bid", "📋 입찰공고", 20),
+    ("bid", "📋 입찰공고", 12),
     ("gov", "🏢 정책", 10),
     ("association", "🏛 협회 소식", 10),
     ("news", "📰 뉴스", 30),
     ("youtube", "🎬 영상", 5),
 )
-# 뉴스는 매체가 많아 한 매체가 지면을 독점하지 않게 제한
-PER_SOURCE_CAP = 5
+# 한 분야가 지면을 독점하지 않게 제한
+TOPIC_CAP = 6
+# 한 매체가 뉴스 지면을 독점하지 않게 제한
+PER_SOURCE_CAP = 8
+# 다이제스트 제목 상한 — 한 줄에 들어오게. 전문은 사이트에서 본다
+DIGEST_TITLE_MAX = 90
+
+
+_AMOUNT_DIGITS_RE = re.compile(r"[\d,]+")
+
+
+def compact_amount(raw: str) -> str:
+    """'1,754,181,818원' → '17.5억'. 다이제스트에서 자릿수가 줄을 잡아먹는다."""
+    m = _AMOUNT_DIGITS_RE.search(raw or "")
+    if not m:
+        return raw
+    try:
+        won = int(m.group(0).replace(",", ""))
+    except ValueError:
+        return raw
+    if won >= 100_000_000:
+        return f"{won / 100_000_000:.1f}".rstrip("0").rstrip(".") + "억"
+    if won >= 10_000:
+        return f"{won // 10_000:,}만"
+    return f"{won:,}원"
+
+
+def compact_deadline(raw: str) -> str:
+    """'2026-09-21 18:00' → '9/21 18:00'. 연도는 거의 항상 올해다."""
+    m = re.match(r"(\d{4})[-.](\d{1,2})[-.](\d{1,2})(?:\s+(\d{1,2}:\d{2}))?", str(raw or ""))
+    if not m:
+        return str(raw)
+    _, month, day, time = m.groups()
+    stamp = f"{int(month)}/{int(day)}"
+    return f"{stamp} {time}" if time else stamp
 
 
 def _digest_meta_line(item: Item) -> str:
@@ -58,17 +94,17 @@ def _digest_meta_line(item: Item) -> str:
         bits.append(escape_html(str(org)))
     deadline = item.extra.get("deadline")
     if deadline:
-        bits.append(f"마감 {escape_html(str(deadline))}")
+        bits.append(f"마감 {escape_html(compact_deadline(deadline))}")
     amount = item.extra.get("amount")
     if amount:
-        bits.append(f"추정 {escape_html(str(amount))}")
+        bits.append(escape_html(compact_amount(str(amount))))
     return " · ".join(bits)
 
 
-def _digest_entry(item: Item) -> list[str]:
+def _digest_entry(item: Item, *, show_source: bool = False) -> list[str]:
     title = escape_html(item.title.strip())
-    if len(title) > 200:
-        title = title[:197] + "..."
+    if len(title) > DIGEST_TITLE_MAX:
+        title = title[:DIGEST_TITLE_MAX - 1].rstrip() + "…"
     href = escape_html(item.url)
     anchor = f'▶️ <a href="{href}">{title}</a>'
     if len(anchor) > SAFE_LIMIT:
@@ -77,16 +113,41 @@ def _digest_entry(item: Item) -> list[str]:
         anchor = f"▶️ {title}"
     lines = [anchor]
     meta = _digest_meta_line(item)
+    if not meta and show_source and item.author:
+        # 분야로 묶으면 매체명이 헤더에서 사라지므로 항목에 붙여 출처를 남긴다
+        meta = escape_html(str(item.author))
     if meta:
         lines.append(meta)
     return lines
 
 
-def _group_by_source(items: list[Item]) -> dict[str, list[Item]]:
+def _balance_by_source(items: list[Item], cap: int) -> tuple[list[Item], int]:
+    """매체별 상한을 적용하고 매체를 번갈아 배치한다. (남은 목록, 잘린 건수)
+
+    단순히 상한만 걸면 뒤이어 적용되는 분야 상한이 균형을 다시 무너뜨린다.
+    발행량 많은 매체 기사가 앞쪽을 채우고 소수 매체는 잘려 나간다.
+    라운드로빈으로 섞어야 어느 단계에서 잘리든 매체가 고루 남는다.
+    """
+    buckets: dict[str, list[Item]] = {}
+    for it in items:
+        buckets.setdefault(it.author or it.source_id, []).append(it)
+
+    dropped = sum(max(0, len(v) - cap) for v in buckets.values())
+    queues = [v[:cap] for v in buckets.values()]
+    kept: list[Item] = []
+    for i in range(cap):
+        for q in queues:
+            if i < len(q):
+                kept.append(q[i])
+    return kept, dropped
+
+
+def _group_by_topic(items: list[Item]) -> list[tuple[str, list[Item]]]:
+    """분야별로 묶되 topics.py가 정한 순서를 따른다. 빈 분야는 건너뛴다."""
     grouped: dict[str, list[Item]] = {}
     for it in items:
-        grouped.setdefault(it.author or it.source_id, []).append(it)
-    return grouped
+        grouped.setdefault(classify(it.title or ""), []).append(it)
+    return [(name, grouped[name]) for name in topic_order() if name in grouped]
 
 
 def format_daily_digest(items: list[Item], day, site_url: str = "",
@@ -109,15 +170,19 @@ def format_daily_digest(items: list[Item], day, site_url: str = "",
         blocks.append(f"<b>{label}</b>")
 
         if category == "news":
-            # 매체별로 묶어 출처가 드러나게 (『커버리지』식 그룹 헤더)
-            for source_name, group in _group_by_source(shown).items():
+            # 분야로 묶기 전에 매체 균형부터. 발행량이 많은 한 매체가 지면을
+            # 독점하면 분야 그룹을 나눠도 결국 그 매체 기사만 보인다.
+            shown, dropped = _balance_by_source(shown, PER_SOURCE_CAP)
+            omitted += dropped
+            # 분야별 그룹 헤더 — 읽는 사람이 관심 구간만 훑을 수 있게
+            for topic, group in _group_by_topic(shown):
                 blocks.append("")
-                blocks.append(f"&lt;{escape_html(source_name)}&gt;")
-                for it in group[:PER_SOURCE_CAP]:
-                    blocks.extend(_digest_entry(it))
+                blocks.append(f"&lt;{escape_html(topic)}&gt;")
+                for it in group[:TOPIC_CAP]:
+                    blocks.extend(_digest_entry(it, show_source=True))
                     total += 1
-                if len(group) > PER_SOURCE_CAP:
-                    omitted += len(group) - PER_SOURCE_CAP
+                if len(group) > TOPIC_CAP:
+                    omitted += len(group) - TOPIC_CAP
         else:
             for it in shown:
                 blocks.extend(_digest_entry(it))
