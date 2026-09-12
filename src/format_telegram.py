@@ -98,6 +98,56 @@ def compact_deadline(raw: str) -> str:
     return f"{stamp} {time}" if time else stamp
 
 
+# ── 종목 시세 ───────────────────────────────────────────────────────────────
+# 다이제스트 맨 위, 공고·뉴스보다 먼저. 증권사 채널이 시황으로 문을 여는 이유와
+# 같다 — 매일 같은 자리에 있어야 훑고 지나갈 수 있다.
+
+KR_QUOTE_CAP = 6
+US_QUOTE_CAP = 5
+
+
+def _arrow(pct: float | None) -> str:
+    if pct is None:
+        return "―"
+    if pct > 0:
+        return f"▲{pct:.2f}%"
+    if pct < 0:
+        return f"▼{abs(pct):.2f}%"
+    return "―0.00%"
+
+
+def _price(quote) -> str:
+    if quote.currency == "USD":
+        return f"${quote.close:,.2f}"
+    return f"{quote.close:,.0f}"
+
+
+def _quote_group(label: str, quotes: list, cap: int) -> list[str]:
+    if not quotes:
+        return []
+    days = [q.as_of for q in quotes if q.as_of]
+    stamp = ""
+    if days:
+        newest = max(days)
+        stamp = f" <i>{newest.month}/{newest.day} 종가</i>"
+    lines = [f"<b>{escape_html(label)}</b>{stamp}"]
+    for q in quotes[:cap]:
+        lines.append(f"{escape_html(q.name)} {_price(q)} {_arrow(q.change_pct)}")
+    return lines
+
+
+def format_quotes(kr: list, us: list) -> list[str]:
+    """시세 블록 (없으면 빈 목록). 국내·미국을 각각 한 묶음으로."""
+    blocks: list[str] = []
+    for label, quotes, cap in (("📈 건설주", kr, KR_QUOTE_CAP),
+                               ("📈 미국 건설·인프라", us, US_QUOTE_CAP)):
+        group = _quote_group(label, quotes, cap)
+        if group:
+            blocks.append("")
+            blocks.extend(group)
+    return blocks
+
+
 def _digest_meta_line(item: Item) -> str:
     """항목 아래 붙는 부가 정보 한 줄. 없으면 빈 문자열."""
     bits: list[str] = []
@@ -174,11 +224,13 @@ def _group_by_topic(items: list[Item]) -> list[tuple[str, list[Item]]]:
 
 
 def format_daily_digest(items: list[Item], day, site_url: str = "",
-                        title: str = "라벤더") -> list[str]:
+                        title: str = "라벤더", quotes: tuple[list, list] | None = None) -> list[str]:
     """수집분을 섹션별로 묶은 일간 다이제스트. 4096자 경계에서 여러 통으로 나뉜다."""
     date_str = f"{day.year}년 {day.month}월 {day.day}일"
     header = f"<b>[{escape_html(title)}] {date_str} ({WEEKDAYS[day.weekday()]})</b>"
     blocks: list[str] = [header]
+    if quotes:
+        blocks.extend(format_quotes(*quotes))
     total = 0
 
     for category, label, cap in DIGEST_SECTIONS:

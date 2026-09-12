@@ -53,6 +53,7 @@ class AppConfig:
     site: SiteConfig
     defaults: dict
     secrets: dict[str, str]
+    stocks: dict  # 다이제스트 시세 섹션 설정 (종목 목록은 코드가 아니라 YAML에)
 
 
 def _require(d: dict, key: str, src_label: str):
@@ -112,7 +113,8 @@ def load_config(path: Path | str = Path("config/sources.yaml")) -> AppConfig:
         ))
 
     secrets = {k: v for k in SECRET_ENV_KEYS if (v := os.environ.get(k))}
-    return AppConfig(sources=sources, site=site, defaults=defaults, secrets=secrets)
+    return AppConfig(sources=sources, site=site, defaults=defaults, secrets=secrets,
+                     stocks=raw.get("stocks") or {})
 
 
 def apply_keyword_filters(title: str, filters: dict) -> bool:

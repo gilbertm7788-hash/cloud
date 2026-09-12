@@ -25,6 +25,7 @@ from .httpio import decode_body, fetch_bytes, redact_secrets
 from .models import Item
 from .report import SourceResult, render_report, update_health, verify_sources, write_github_summary
 from .site_build import build_site
+from .stocks import fetch_quotes
 from .telegram_client import TelegramClient, TelegramError
 
 log = logging.getLogger("pipeline")
@@ -181,8 +182,15 @@ def run_collect(args: argparse.Namespace) -> int:
     # 수집이 끝난 뒤 하루치를 한 통(필요 시 여러 통)으로 묶어 보낸다.
     # 건별 전송은 하루 수십 통이 되어 검토가 불가능했다.
     if posting and tg is not None and digest_items:
+        # 시세는 부가 정보 — 실패해도 공고·뉴스 배달을 막지 않는다
+        try:
+            quotes = fetch_quotes(cfg.stocks, cfg.secrets)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("시세 조회 실패: %s", str(exc)[:200])
+            quotes = ([], [])
         msgs = format_daily_digest(
-            digest_items, datetime.now(KST).date(), site_url, title=cfg.site.title
+            digest_items, datetime.now(KST).date(), site_url,
+            title=cfg.site.title, quotes=quotes,
         )
         sent_all, last_mid = True, None
         for msg in msgs:
@@ -463,8 +471,14 @@ def run_digest_preview(args: argparse.Namespace) -> int:
         store.close()
         return 2
 
+    try:
+        quotes = fetch_quotes(cfg.stocks, cfg.secrets)
+    except Exception as exc:  # noqa: BLE001
+        print(f"시세 조회 실패(본문만 미리보기): {str(exc)[:200]}")
+        quotes = ([], [])
     msgs = format_daily_digest(
-        items, datetime.now(KST).date(), cfg.site.base_url, title=cfg.site.title
+        items, datetime.now(KST).date(), cfg.site.base_url,
+        title=cfg.site.title, quotes=quotes,
     )
     preview = "\n".join(msgs)
     print(f"{len(items)}건 → 메시지 {len(msgs)}통 / {len(preview)}자")
@@ -486,6 +500,25 @@ def run_digest_preview(args: argparse.Namespace) -> int:
     print(f"스테이징 채널로 {len(msgs)}통 전송 완료")
     store.close()
     return 0
+
+
+def run_smoke_stocks(args: argparse.Namespace) -> int:  # noqa: ARG001
+    """종목 시세만 따로 조회해 본다 — 국내는 활용신청, 미국은 외부 접근성 확인용."""
+    cfg = load_config()
+    kr, us = fetch_quotes(cfg.stocks, cfg.secrets)
+    lines = ["| 구분 | 종목 | 종가 | 등락 | 기준일 |", "|---|---|---|---|---|"]
+    for label, quotes in (("국내", kr), ("미국", us)):
+        for q in quotes:
+            pct = "―" if q.change_pct is None else f"{q.change_pct:+.2f}%"
+            lines.append(f"| {label} | {q.name} | {q.close:,.2f} | {pct} | {q.as_of} |")
+    want_kr = len(cfg.stocks.get("kr") or [])
+    want_us = len(cfg.stocks.get("us") or [])
+    summary = f"국내 {len(kr)}/{want_kr}종목, 미국 {len(us)}/{want_us}종목 조회 성공"
+    print(summary)
+    print("\n".join(lines))
+    write_github_summary(f"# smoke-stocks\n\n{summary}\n\n" + "\n".join(lines))
+    # 한쪽이라도 비면 설정이 덜 끝난 것 — 실패로 알린다
+    return 0 if (kr or not want_kr) and (us or not want_us) else 1
 
 
 def run_build_site(args: argparse.Namespace) -> int:  # noqa: ARG001
@@ -513,6 +546,7 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("verify-sources", help="전 소스 접근성 검증 리포트").set_defaults(func=run_verify)
     sub.add_parser("smoke-g2b", help="나라장터 direct/relay 판별").set_defaults(func=run_smoke_g2b)
+    sub.add_parser("smoke-stocks", help="건설 관련 종목 시세 조회 확인").set_defaults(func=run_smoke_stocks)
 
     p_draft = sub.add_parser("blog-draft", help="네이버 블로그 초안 생성")
     p_draft.add_argument("--date", help="YYYY-MM-DD (기본: 오늘 KST)")
