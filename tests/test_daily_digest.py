@@ -164,3 +164,38 @@ def test_balance_interleaves_outlets():
              + [item("news", "B0", author="B")])
     kept, _ = _balance_by_source(items, 3)
     assert [i.author for i in kept][:2] == ["A", "B"]
+
+
+def test_bids_below_floor_are_dropped():
+    from src.format_telegram import BID_MIN_AMOUNT
+    small = item("bid", "소액 용역", amount=f"{BID_MIN_AMOUNT - 1:,}원")
+    big = item("bid", "대형 공사", amount=f"{BID_MIN_AMOUNT:,}원")
+    body = "\n".join(format_daily_digest([small, big], DAY))
+    assert "대형 공사" in body and "소액 용역" not in body
+
+
+def test_bids_without_amount_are_kept():
+    """금액을 모르면 작다고 단정할 수 없으므로 남긴다."""
+    body = "\n".join(format_daily_digest([item("bid", "금액 미상 공고")], DAY))
+    assert "금액 미상 공고" in body
+
+
+def test_bids_sorted_by_amount_desc():
+    items = [item("bid", "중간", amount="5,000,000,000원"),
+             item("bid", "최대", amount="90,000,000,000원"),
+             item("bid", "최소", amount="1,000,000,000원")]
+    body = "\n".join(format_daily_digest(items, DAY))
+    assert body.index("최대") < body.index("중간") < body.index("최소")
+
+
+def test_bid_section_header_states_the_floor():
+    from src.format_telegram import BID_MIN_LABEL
+    body = "\n".join(format_daily_digest([item("bid", "공사", amount="20,000,000,000원")], DAY))
+    assert f"추정가 {BID_MIN_LABEL} 이상" in body
+
+
+def test_parse_won():
+    from src.format_telegram import parse_won
+    assert parse_won("1,234,000,000원") == 1234000000
+    assert parse_won("미상") is None
+    assert parse_won("") is None

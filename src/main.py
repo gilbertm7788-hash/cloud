@@ -12,6 +12,7 @@ import argparse
 import logging
 import re
 import sys
+from pathlib import Path
 from datetime import date, datetime, timedelta, timezone
 
 from .blog_draft import build_draft, write_draft
@@ -398,6 +399,11 @@ def run_probe(args: argparse.Namespace) -> int:
     text = "\n".join(out)
     print(text)
     write_github_summary(f"# probe: {', '.join(targets)}\n\n```\n{text[:60000]}\n```")
+    # state/는 워크플로가 커밋하므로, 저장소를 통해 결과를 다시 읽을 수 있다.
+    # Actions 로그 본문은 API로 꺼내기 어려워 진단 결과가 화면에만 남았다.
+    probe_log = Path("state/probe-latest.txt")
+    probe_log.parent.mkdir(parents=True, exist_ok=True)
+    probe_log.write_text(f"# probe: {', '.join(targets)}\n\n{text}\n", encoding="utf-8")
     return rc
 
 

@@ -40,34 +40,46 @@ def split_blocks(blocks: list[str], limit: int = SAFE_LIMIT) -> list[str]:
 
 WEEKDAYS = ("월", "화", "수", "목", "금", "토", "일")
 
-# 섹션 순서 = 독자 가치 순. 위원회 모집은 다른 데서 찾기 어려운 정보라 맨 앞.
-DIGEST_SECTIONS = (
-    ("committee", "👥 위원회 모집", None),
-    ("bid", "📋 입찰공고", 12),
-    ("gov", "🏢 정책", 10),
-    ("association", "🏛 협회 소식", 10),
-    ("news", "📰 뉴스", 30),
-    ("youtube", "🎬 영상", 5),
-)
 # 한 분야가 지면을 독점하지 않게 제한
 TOPIC_CAP = 6
 # 한 매체가 뉴스 지면을 독점하지 않게 제한
 PER_SOURCE_CAP = 8
 # 다이제스트 제목 상한 — 한 줄에 들어오게. 전문은 사이트에서 본다
 DIGEST_TITLE_MAX = 90
+# 다이제스트에 실을 입찰 추정가 하한. 실측상 전체의 9%만 이 선을 넘는다.
+# 소액 용역까지 실으면 지면을 다 먹는다 — 전체 목록은 사이트에 있다.
+BID_MIN_AMOUNT = 1_000_000_000
+BID_MIN_LABEL = "10억"
+
+# 섹션 순서 = 독자 가치 순. 위원회 모집은 다른 데서 찾기 어려운 정보라 맨 앞.
+DIGEST_SECTIONS = (
+    ("committee", "👥 위원회 모집", None),
+    ("bid", f"📋 입찰공고 (추정가 {BID_MIN_LABEL} 이상)", 12),
+    ("gov", "🏢 정책", 10),
+    ("association", "🏛 협회 소식", 10),
+    ("news", "📰 뉴스", 30),
+    ("youtube", "🎬 영상", 5),
+)
 
 
 _AMOUNT_DIGITS_RE = re.compile(r"[\d,]+")
 
 
-def compact_amount(raw: str) -> str:
-    """'1,754,181,818원' → '17.5억'. 다이제스트에서 자릿수가 줄을 잡아먹는다."""
+def parse_won(raw: str) -> int | None:
+    """'1,754,181,818원' → 1754181818. 숫자를 못 찾으면 None."""
     m = _AMOUNT_DIGITS_RE.search(raw or "")
     if not m:
-        return raw
+        return None
     try:
-        won = int(m.group(0).replace(",", ""))
+        return int(m.group(0).replace(",", ""))
     except ValueError:
+        return None
+
+
+def compact_amount(raw: str) -> str:
+    """'1,754,181,818원' → '17.5억'. 다이제스트에서 자릿수가 줄을 잡아먹는다."""
+    won = parse_won(raw)
+    if won is None:
         return raw
     if won >= 100_000_000:
         return f"{won / 100_000_000:.1f}".rstrip("0").rstrip(".") + "억"
@@ -121,6 +133,17 @@ def _digest_entry(item: Item, *, show_source: bool = False) -> list[str]:
     return lines
 
 
+def _select_bids(items: list[Item]) -> list[Item]:
+    """추정가 하한 이상만, 금액 큰 순으로. 금액 미상은 판단할 수 없어 남긴다."""
+    kept = []
+    for it in items:
+        won = parse_won(str(it.extra.get("amount") or ""))
+        if won is None or won >= BID_MIN_AMOUNT:
+            kept.append((won or 0, it))
+    kept.sort(key=lambda pair: pair[0], reverse=True)
+    return [it for _, it in kept]
+
+
 def _balance_by_source(items: list[Item], cap: int) -> tuple[list[Item], int]:
     """매체별 상한을 적용하고 매체를 번갈아 배치한다. (남은 목록, 잘린 건수)
 
@@ -160,6 +183,8 @@ def format_daily_digest(items: list[Item], day, site_url: str = "",
 
     for category, label, cap in DIGEST_SECTIONS:
         bucket = [it for it in items if (it.category or "news") == category]
+        if category == "bid":
+            bucket = _select_bids(bucket)
         if not bucket:
             continue
         shown, omitted = bucket, 0
