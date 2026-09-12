@@ -159,6 +159,10 @@ sources:
       fields:
         title: {selector: "a", attr: text}
         link: {selector: "a", attr: href}
+        # 실측(2026-09): 3번째 칸이 글쓴이 = 공고를 낸 원 기관 (재정경제부, 부천시 …).
+        # 학회가 옮겨 실은 글이라 링크는 학회로 가지만, 누구 공고인지는 이 칸에 남는다.
+        org: {selector: "td.text-center", attr: text}
+        date: {selector: "td.date", attr: text}
     filters:
       keyword_include: ["위원", "모집", "공모", "평가", "심의", "세미나", "심포지엄"]
 
@@ -179,6 +183,13 @@ sources:
         link: {selector: "a", attr: href, pattern: "fnReadArticle\\((\\d+)\\)",
                template: "https://www.kira.or.kr/jsp/main/01/02.jsp?mode=read&ba_id={value}"}
         date: {selector: "td:nth-of-type(4)", attr: text}
+      # 협회 게시판의 작성자 칸은 늘 '대한건축사협회'라 쓸모가 없다.
+      # 원 기관은 제목 앞 두 번째 대괄호에만 남는다 —
+      # 실측: "[건축계소식] [창원시]창원시 도시계획위원회 위원 공개모집 안내"
+      title_tags:
+        ignore: ["건축계소식", "건축세미나", "건축뉴스", "공지사항", "협회소식", "행사소식", "공지"]
+        as_org: true
+        strip: true
     filters:
       keyword_include: ["위원", "모집", "공모", "평가", "심의", "경관"]
 

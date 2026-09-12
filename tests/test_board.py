@@ -145,3 +145,64 @@ def test_collect_proceeds_when_robots_allows(monkeypatch):
     finally:
         store.close()
         robots.reset_cache()
+
+
+# ── 제목 앞 [태그]에서 원 기관 뽑기 (협회 게시판 전재글) ──────────────────────
+
+from src.collectors.board import split_title_tags  # noqa: E402
+
+KIRA_TAGS = {"ignore": ["건축계소식", "건축세미나", "공지"], "as_org": True, "strip": True}
+
+
+def test_second_tag_is_the_originating_agency():
+    title, org = split_title_tags(
+        "[건축계소식] [창원시]창원시 도시계획위원회 위원 공개모집 안내", KIRA_TAGS)
+    assert org == "창원시"
+    assert title == "창원시 도시계획위원회 위원 공개모집 안내"
+
+
+def test_category_only_title_has_no_agency():
+    title, org = split_title_tags("[건축세미나] 물류시설 피난설계 세미나", KIRA_TAGS)
+    assert org is None
+    assert title == "물류시설 피난설계 세미나"
+
+
+def test_untagged_title_is_untouched():
+    assert split_title_tags("당진성모병원 신축공사 건축설계공모", KIRA_TAGS) == (
+        "당진성모병원 신축공사 건축설계공모", None)
+
+
+def test_tags_are_not_stripped_when_asked_not_to():
+    spec = dict(KIRA_TAGS, strip=False)
+    title, org = split_title_tags("[건축계소식] [안양시]제안서 평가위원 공개모집", spec)
+    assert org == "안양시"
+    assert title == "[건축계소식] [안양시]제안서 평가위원 공개모집"
+
+
+def test_title_that_is_only_tags_keeps_its_text():
+    """태그만 있는 제목에서 태그를 다 떼면 빈 문자열이 된다 — 그 글은 사라진다."""
+    title, org = split_title_tags("[건축계소식][창원시]", KIRA_TAGS)
+    assert title == "[건축계소식][창원시]"
+    assert org == "창원시"
+
+
+def test_list_page_prefers_the_writer_column_over_the_title_tag():
+    """글쓴이 칸이 있는 게시판에서는 그쪽이 더 정확하다."""
+    from src.config import SourceConfig
+    html = """<table><tr>
+      <td class="board-title"><a href="?num=1">[건축계소식] [창원시]위원 공개모집</a></td>
+      <td class="text-center">재정경제부</td></tr></table>"""
+    source = SourceConfig(
+        id="t", name="t", type="board", category="committee",
+        options={
+            "row_selector": "table tr:has(a)",
+            "url_base": "https://ex.com/board/",
+            "fields": {"title": {"selector": "a", "attr": "text"},
+                       "link": {"selector": "a", "attr": "href"},
+                       "org": {"selector": "td.text-center", "attr": "text"}},
+            "title_tags": KIRA_TAGS,
+        },
+    )
+    items = parse_list_page(html, source, "https://ex.com/board/")
+    assert items[0].extra["org"] == "재정경제부"
+    assert items[0].title == "위원 공개모집"

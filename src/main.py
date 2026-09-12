@@ -447,11 +447,7 @@ def run_probe(args: argparse.Namespace) -> int:
     text = "\n".join(out)
     print(text)
     write_github_summary(f"# probe: {', '.join(targets)}\n\n```\n{text[:60000]}\n```")
-    # state/는 워크플로가 커밋하므로, 저장소를 통해 결과를 다시 읽을 수 있다.
-    # Actions 로그 본문은 API로 꺼내기 어려워 진단 결과가 화면에만 남았다.
-    probe_log = Path("state/probe-latest.txt")
-    probe_log.parent.mkdir(parents=True, exist_ok=True)
-    probe_log.write_text(f"# probe: {', '.join(targets)}\n\n{text}\n", encoding="utf-8")
+    write_run_log(f"probe: {', '.join(targets)}", text)
     return rc
 
 
@@ -502,6 +498,16 @@ def run_digest_preview(args: argparse.Namespace) -> int:
     return 0
 
 
+def write_run_log(title: str, text: str) -> None:
+    """진단 결과를 state/에 남긴다 — 워크플로가 커밋하므로 저장소에서 다시 읽을 수 있다.
+
+    Actions 로그 본문은 API로 꺼내기 어려워 진단 결과가 화면에만 남고 사라졌다.
+    """
+    path = Path("state/probe-latest.txt")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"# {title}\n\n{text}\n", encoding="utf-8")
+
+
 def run_smoke_stocks(args: argparse.Namespace) -> int:  # noqa: ARG001
     """종목 시세만 따로 조회해 본다 — 국내는 활용신청, 미국은 외부 접근성 확인용."""
     cfg = load_config()
@@ -514,9 +520,10 @@ def run_smoke_stocks(args: argparse.Namespace) -> int:  # noqa: ARG001
     want_kr = len(cfg.stocks.get("kr") or [])
     want_us = len(cfg.stocks.get("us") or [])
     summary = f"국내 {len(kr)}/{want_kr}종목, 미국 {len(us)}/{want_us}종목 조회 성공"
-    print(summary)
-    print("\n".join(lines))
-    write_github_summary(f"# smoke-stocks\n\n{summary}\n\n" + "\n".join(lines))
+    body = summary + "\n\n" + "\n".join(lines)
+    print(body)
+    write_github_summary(f"# smoke-stocks\n\n{body}")
+    write_run_log("smoke-stocks", body)
     # 한쪽이라도 비면 설정이 덜 끝난 것 — 실패로 알린다
     return 0 if (kr or not want_kr) and (us or not want_us) else 1
 

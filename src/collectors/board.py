@@ -19,6 +19,8 @@ sources.yaml 예:
         #                  template: "https://.../view.do?id={value}"}
         date:  {selector: "td.date", attr: text, date_format: "%Y-%m-%d"}   # 옵션
         org:   {selector: "td.writer", attr: text}                           # 옵션
+      # 제목 앞 [태그] 처리 (옵션) — 게시판 분류 태그는 버리고 남은 태그를 기관명으로
+      title_tags: {ignore: ["건축계소식"], as_org: true, strip: true}
 """
 from __future__ import annotations
 
@@ -66,6 +68,38 @@ def extract_field(row_el, spec: dict) -> str | None:
     if template:
         value = template.replace("{value}", value)
     return value or None
+
+
+_TITLE_TAG_RE = re.compile(r"^\s*\[\s*([^\[\]]{1,20})\s*\]\s*")
+MAX_TITLE_TAGS = 3  # 제목 앞 태그가 이보다 많으면 우리가 아는 패턴이 아니다
+
+
+def split_title_tags(title: str, spec: dict) -> tuple[str, str | None]:
+    """제목 앞 [태그]를 떼어내 (제목, 기관명)로 나눈다.
+
+    협회 게시판은 남의 기관 공고를 옮겨 싣고, 그 기관 이름이 제목 앞 대괄호에만
+    남는다 — 실측: "[건축계소식] [창원시]창원시 도시계획위원회 위원 공개모집".
+    게시판 분류 태그(ignore)를 건너뛴 첫 태그를 발주기관으로 본다.
+    """
+    tags: list[str] = []
+    rest = title
+    while len(tags) < MAX_TITLE_TAGS:
+        m = _TITLE_TAG_RE.match(rest)
+        if not m:
+            break
+        tags.append(m.group(1).strip())
+        rest = rest[m.end():]
+    if not tags:
+        return title.strip(), None
+
+    ignore = {str(x).strip() for x in (spec.get("ignore") or [])}
+    org = None
+    if spec.get("as_org", True):
+        org = next((t for t in tags if t and t not in ignore), None)
+    if not spec.get("strip", True):
+        return title.strip(), org
+    # 태그를 다 떼고 나면 빈 제목이 되는 글도 있다 — 그때는 원문을 지킨다
+    return (rest.strip() or title.strip()), org
 
 
 def _parse_date(text: str, date_format: str | None) -> datetime | None:
@@ -133,6 +167,11 @@ def parse_list_page(html: str, source: SourceConfig, base_url: str) -> list[Item
             org = extract_field(row, fields["org"])
             if org:
                 extra["org"] = org
+        if cfg.get("title_tags"):
+            title, tag_org = split_title_tags(title, cfg["title_tags"])
+            # 목록에 글쓴이 칸이 따로 있으면 그쪽이 더 정확하다
+            if tag_org and not extra.get("org"):
+                extra["org"] = tag_org
         items.append(Item(
             source_id=source.id,
             category=source.category,
