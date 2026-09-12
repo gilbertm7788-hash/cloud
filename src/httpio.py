@@ -12,7 +12,10 @@ import httpx
 
 log = logging.getLogger(__name__)
 
-DEFAULT_UA = "Mozilla/5.0 (compatible; ConstructionNewsBot/1.0; +https://github.com)"
+DEFAULT_UA = (
+    "Mozilla/5.0 (compatible; LavenderBot/1.0; "
+    "+https://lavender-kr-official.github.io/about.html)"
+)
 
 _META_CHARSET_RE = re.compile(
     rb"""<meta[^>]+charset\s*=\s*["']?\s*([a-zA-Z0-9_-]+)""", re.IGNORECASE

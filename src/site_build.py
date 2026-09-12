@@ -162,7 +162,7 @@ def _post_html(day: date, items: list[dict], site: SiteConfig, summary: str | No
 {summary_html}
 {"".join(sections)}
 {tg_button}
-<footer><p>본 글은 공개된 뉴스·공고를 큐레이션한 것이며, 각 항목의 자세한 내용은 출처 링크를 확인해 주세요.</p></footer>
+<footer><p>본 글은 공개된 뉴스·공고의 제목과 링크를 모아 정리한 것입니다. 본문은 수집하지 않으며 각 항목의 자세한 내용은 출처 링크를 확인해 주세요.</p><p><a href="../about.html">안내 및 문의 · 게시 중단 요청</a></p></footer>
 </main>
 </body>
 </html>
@@ -216,7 +216,7 @@ def build_posts_index(site: SiteConfig) -> None:
 def build_sitemap(site: SiteConfig) -> None:
     if not site.base_url:
         return
-    urls = [f"{site.base_url}/", f"{site.base_url}/posts/"]
+    urls = [f"{site.base_url}/", f"{site.base_url}/about.html", f"{site.base_url}/posts/"]
     urls += [f"{site.base_url}/posts/{d}.html" for d in _existing_posts()]
     body = "\n".join(
         f"  <url><loc>{html.escape(u)}</loc></url>" for u in urls

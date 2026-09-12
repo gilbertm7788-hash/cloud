@@ -1,3 +1,5 @@
+import pytest
+
 from src.collectors.board import parse_list_page
 from src.config import SourceConfig, apply_keyword_filters
 from src.httpio import decode_body
@@ -95,3 +97,51 @@ def test_declared_utf8_with_stray_byte_stays_utf8():
     assert "건설" in decoded
     assert "뉴스 제목입니다" in decoded
     assert "�" in decoded  # 깨진 바이트만 대체 문자로
+
+
+def test_collect_refuses_when_robots_disallows(monkeypatch):
+    """robots.txt가 막으면 조용히 건너뛰지 않고 소스 실패로 드러나야 한다."""
+    from src import robots
+    from src.collectors import board
+    from src.collectors.base import CollectError, RunContext
+    from src.dedup import SeenStore
+
+    robots.reset_cache()
+    monkeypatch.setattr(
+        robots, "fetch_bytes",
+        lambda url, **kw: (b"User-agent: *\nDisallow: /not/\n", "utf-8"),
+    )
+    called = []
+    monkeypatch.setattr(board, "fetch_bytes", lambda *a, **kw: called.append(a) or (b"", None))
+
+    store = SeenStore(":memory:")
+    try:
+        with pytest.raises(CollectError, match="robots.txt"):
+            board.collect(board_source(), RunContext(seen_store=store))
+        assert called == []  # 페이지 요청 자체가 나가지 않아야 함
+    finally:
+        store.close()
+        robots.reset_cache()
+
+
+def test_collect_proceeds_when_robots_allows(monkeypatch):
+    from src import robots
+    from src.collectors import board
+    from src.collectors.base import RunContext
+    from src.dedup import SeenStore
+
+    robots.reset_cache()
+    monkeypatch.setattr(
+        robots, "fetch_bytes", lambda url, **kw: (b"User-agent: *\nDisallow: /admin/\n", "utf-8")
+    )
+    monkeypatch.setattr(
+        board, "fetch_bytes", lambda *a, **kw: (BOARD_HTML.encode("utf-8"), "utf-8")
+    )
+
+    store = SeenStore(":memory:")
+    try:
+        items = board.collect(board_source(), RunContext(seen_store=store))
+        assert len(items) == 2
+    finally:
+        store.close()
+        robots.reset_cache()

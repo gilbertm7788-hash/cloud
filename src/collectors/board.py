@@ -31,6 +31,7 @@ from bs4 import BeautifulSoup
 
 from ..config import SourceConfig
 from ..httpio import decode_body, fetch_bytes, normalize_url
+from ..robots import can_fetch, wait_for_host
 from ..models import Item
 from .base import CollectError, RunContext
 
@@ -155,6 +156,7 @@ def collect(source: SourceConfig, ctx: RunContext) -> list[Item]:
     method = (cfg.get("method") or "GET").upper()
     encoding = cfg.get("encoding", "auto")
     verify_tls = bool(cfg.get("verify_tls", True))
+    respect_robots = bool(cfg.get("respect_robots", True))
     if not verify_tls:
         log.warning("'%s': TLS 검증 비활성 (구형 인증서 사이트)", source.id)
 
@@ -167,6 +169,14 @@ def collect(source: SourceConfig, ctx: RunContext) -> list[Item]:
                 k: str(v).replace("{page}", str(page))
                 for k, v in (cfg.get("form_data") or {}).items()
             }
+        if respect_robots and not can_fetch(url, verify_tls=verify_tls):
+            raise CollectError(
+                f"'{source.id}': robots.txt가 수집을 금지함 ({url}). "
+                "정책이 바뀐 것이라면 소스를 비활성화하거나 "
+                "board.respect_robots: false로 명시적으로 해제할 것"
+            )
+        if respect_robots:
+            wait_for_host(url)
         try:
             content, charset = fetch_bytes(
                 url, timeout=source.timeout, verify_tls=verify_tls,
