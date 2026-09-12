@@ -511,7 +511,8 @@ def write_run_log(title: str, text: str) -> None:
 def run_smoke_stocks(args: argparse.Namespace) -> int:  # noqa: ARG001
     """종목 시세만 따로 조회해 본다 — 국내는 활용신청, 미국은 외부 접근성 확인용."""
     cfg = load_config()
-    kr, us = fetch_quotes(cfg.stocks, cfg.secrets)
+    errors: list[str] = []
+    kr, us = fetch_quotes(cfg.stocks, cfg.secrets, errors=errors)
     lines = ["| 구분 | 종목 | 종가 | 등락 | 기준일 |", "|---|---|---|---|---|"]
     for label, quotes in (("국내", kr), ("미국", us)):
         for q in quotes:
@@ -521,6 +522,8 @@ def run_smoke_stocks(args: argparse.Namespace) -> int:  # noqa: ARG001
     want_us = len(cfg.stocks.get("us") or [])
     summary = f"국내 {len(kr)}/{want_kr}종목, 미국 {len(us)}/{want_us}종목 조회 성공"
     body = summary + "\n\n" + "\n".join(lines)
+    if errors:
+        body += "\n\n실패 사유\n" + "\n".join(f"- {e}" for e in errors)
     print(body)
     write_github_summary(f"# smoke-stocks\n\n{body}")
     write_run_log("smoke-stocks", body)

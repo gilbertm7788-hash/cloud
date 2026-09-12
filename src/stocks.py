@@ -87,9 +87,12 @@ def _krx_quote(code: str, name: str, service_key: str, timeout: float) -> Quote 
                  as_of=as_of, currency="KRW")
 
 
-def fetch_kr(tickers: list[dict], service_key: str, timeout: float = 20) -> list[Quote]:
+def fetch_kr(tickers: list[dict], service_key: str, timeout: float = 20,
+             errors: list[str] | None = None) -> list[Quote]:
     if not service_key:
         log.info("DATA_GO_KR_KEY 없음 — 국내 시세 생략")
+        if errors is not None:
+            errors.append("국내: DATA_GO_KR_KEY 미설정")
         return []
     quotes: list[Quote] = []
     for t in tickers:
@@ -100,6 +103,8 @@ def fetch_kr(tickers: list[dict], service_key: str, timeout: float = 20) -> list
             q = _krx_quote(code, name or code, service_key, timeout)
         except Exception as exc:  # noqa: BLE001 — 종목 하나가 전체를 막지 않는다
             log.warning("국내 시세 실패 %s: %s", code, str(exc)[:200])
+            if errors is not None:
+                errors.append(f"국내 {code}: {str(exc)[:200]}")
             continue
         if q:
             quotes.append(q)
@@ -144,7 +149,8 @@ def _stooq_quote(symbol: str, name: str, timeout: float) -> Quote | None:
     return Quote(name=name, close=close, change_pct=change, as_of=as_of, currency="USD")
 
 
-def fetch_us(tickers: list[dict], timeout: float = 20) -> list[Quote]:
+def fetch_us(tickers: list[dict], timeout: float = 20,
+             errors: list[str] | None = None) -> list[Quote]:
     quotes: list[Quote] = []
     for t in tickers:
         symbol = str(t.get("symbol") or "").strip()
@@ -155,16 +161,23 @@ def fetch_us(tickers: list[dict], timeout: float = 20) -> list[Quote]:
             q = _stooq_quote(symbol, name, timeout)
         except Exception as exc:  # noqa: BLE001
             log.warning("미국 시세 실패 %s: %s", symbol, str(exc)[:200])
+            if errors is not None:
+                errors.append(f"미국 {symbol}: {str(exc)[:200]}")
             continue
         if q:
             quotes.append(q)
     return quotes
 
 
-def fetch_quotes(cfg: dict, secrets: dict, timeout: float = 20) -> tuple[list[Quote], list[Quote]]:
-    """(국내, 미국) 시세. 설정이 꺼져 있으면 빈 목록."""
+def fetch_quotes(cfg: dict, secrets: dict, timeout: float = 20,
+                 errors: list[str] | None = None) -> tuple[list[Quote], list[Quote]]:
+    """(국내, 미국) 시세. 설정이 꺼져 있으면 빈 목록.
+
+    errors를 넘기면 종목별 실패 사유가 담긴다 — 진단(smoke-stocks)에서만 쓴다.
+    수집 경로에서는 실패를 로그로만 남기고 조용히 지나간다.
+    """
     if not cfg or not cfg.get("enabled", True):
         return [], []
-    kr = fetch_kr(list(cfg.get("kr") or []), secrets.get("DATA_GO_KR_KEY", ""), timeout)
-    us = fetch_us(list(cfg.get("us") or []), timeout)
+    kr = fetch_kr(list(cfg.get("kr") or []), secrets.get("DATA_GO_KR_KEY", ""), timeout, errors)
+    us = fetch_us(list(cfg.get("us") or []), timeout, errors)
     return kr, us
