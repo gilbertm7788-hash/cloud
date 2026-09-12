@@ -401,6 +401,47 @@ def run_probe(args: argparse.Namespace) -> int:
     return rc
 
 
+def run_digest_preview(args: argparse.Namespace) -> int:
+    """최근 수집분으로 다이제스트를 만들어 스테이징에 보낸다 (상태 변경 없음).
+
+    게시 형식을 바꾼 뒤 실제 모양을 확인할 때 쓴다. 신규 항목이 없어도
+    동작하고, posted/pending 상태를 건드리지 않아 몇 번을 돌려도 안전하다.
+    """
+    cfg = load_config()
+    store = SeenStore()
+    rows = store.recent(days=args.days, statuses=("posted", "seen", "pending", "skipped"))
+    items = [_item_from_row(r) for r in rows]
+    items = [it for it in items if it.title and it.url]
+    if not items:
+        print(f"최근 {args.days}일 수집분이 없습니다")
+        store.close()
+        return 2
+
+    msgs = format_daily_digest(
+        items, datetime.now(KST).date(), cfg.site.base_url, title=cfg.site.title
+    )
+    preview = "\n".join(msgs)
+    print(f"{len(items)}건 → 메시지 {len(msgs)}통 / {len(preview)}자")
+    write_github_summary(f"# 다이제스트 미리보기\n\n```\n{preview[:60000]}\n```")
+
+    tg, staging_chat = _telegram(cfg)
+    if tg is None:
+        print("텔레그램 미설정 — 위 Summary로만 확인하세요")
+        store.close()
+        return 0
+    for i, msg in enumerate(msgs, 1):
+        marker = f"<i>[미리보기 {i}/{len(msgs)}]</i>\n"
+        try:
+            tg.send_message(staging_chat, marker + msg, {"is_disabled": True})
+        except TelegramError as exc:
+            print(f"전송 실패: {redact_secrets(str(exc), cfg.secrets.values())}")
+            store.close()
+            return 1
+    print(f"스테이징 채널로 {len(msgs)}통 전송 완료")
+    store.close()
+    return 0
+
+
 def run_build_site(args: argparse.Namespace) -> int:  # noqa: ARG001
     cfg = load_config()
     store = SeenStore()
@@ -432,6 +473,11 @@ def main(argv: list[str] | None = None) -> int:
     p_draft.set_defaults(func=run_blog_draft)
 
     sub.add_parser("build-site", help="site/ 재생성").set_defaults(func=run_build_site)
+
+    p_preview = sub.add_parser(
+        "digest-preview", help="최근 수집분으로 다이제스트를 만들어 스테이징에 전송 (상태 변경 없음)")
+    p_preview.add_argument("--days", type=int, default=1, help="최근 며칠분 (기본 1)")
+    p_preview.set_defaults(func=run_digest_preview)
 
     p_probe = sub.add_parser("probe", help="소스 튜닝 진단: URL 응답/피드 링크 또는 소스 셀렉터 매칭 확인")
     p_probe.add_argument("--target", help="URL(http...) 또는 sources.yaml의 소스 id")
