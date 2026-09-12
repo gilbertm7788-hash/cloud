@@ -36,12 +36,12 @@
   "last_error": ""
  },
  "g2b_construction": {
-  "consecutive_bad": 19,
-  "last_error": "나라장터 접근 불가 (direct·relay 모두 실패) — docs/setup-worker-relay.md 참조"
+  "consecutive_bad": 0,
+  "last_error": ""
  },
  "g2b_engineering": {
-  "consecutive_bad": 19,
-  "last_error": "나라장터 접근 불가 (direct·relay 모두 실패) — docs/setup-worker-relay.md 참조"
+  "consecutive_bad": 0,
+  "last_error": ""
  },
  "molit_notice": {
   "consecutive_bad": 0,
