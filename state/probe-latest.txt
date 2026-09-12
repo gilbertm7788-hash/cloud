@@ -4,3 +4,25 @@
 
 | 구분 | 종목 | 종가 | 등락 | 기준일 |
 |---|---|---|---|---|
+
+실패 사유
+- 국내 000720: curl exit 22: curl: (22) The requested URL returned error: 403
+ | 응답본문: { "OpenAPI_ServiceResponse": { "cmmMsgHeader": { "errMsg": "SERVICE_KEY_IS_NOT_REGISTERED_ERROR", "returnAuthMsg": "등록되지 않은 서비스키
+- 국내 028260: curl exit 22: curl: (22) The requested URL returned error: 403
+ | 응답본문: { "OpenAPI_ServiceResponse": { "cmmMsgHeader": { "errMsg": "SERVICE_KEY_IS_NOT_REGISTERED_ERROR", "returnAuthMsg": "등록되지 않은 서비스키
+- 국내 375500: curl exit 22: curl: (22) The requested URL returned error: 403
+ | 응답본문: { "OpenAPI_ServiceResponse": { "cmmMsgHeader": { "errMsg": "SERVICE_KEY_IS_NOT_REGISTERED_ERROR", "returnAuthMsg": "등록되지 않은 서비스키
+- 국내 006360: curl exit 22: curl: (22) The requested URL returned error: 403
+ | 응답본문: { "OpenAPI_ServiceResponse": { "cmmMsgHeader": { "errMsg": "SERVICE_KEY_IS_NOT_REGISTERED_ERROR", "returnAuthMsg": "등록되지 않은 서비스키
+- 국내 047040: curl exit 22: curl: (22) The requested URL returned error: 403
+ | 응답본문: { "OpenAPI_ServiceResponse": { "cmmMsgHeader": { "errMsg": "SERVICE_KEY_IS_NOT_REGISTERED_ERROR", "returnAuthMsg": "등록되지 않은 서비스키
+- 국내 028050: curl exit 22: curl: (22) The requested URL returned error: 403
+ | 응답본문: { "OpenAPI_ServiceResponse": { "cmmMsgHeader": { "errMsg": "SERVICE_KEY_IS_NOT_REGISTERED_ERROR", "returnAuthMsg": "등록되지 않은 서비스키
+- 국내 294870: curl exit 22: curl: (22) The requested URL returned error: 403
+ | 응답본문: { "OpenAPI_ServiceResponse": { "cmmMsgHeader": { "errMsg": "SERVICE_KEY_IS_NOT_REGISTERED_ERROR", "returnAuthMsg": "등록되지 않은 서비스키
+- 미국 CAT: CSV 아님: <!DOCTYPE html><html><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"></head><body><noscript>T
+- 미국 PWR: CSV 아님: <!DOCTYPE html><html><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"></head><body><noscript>T
+- 미국 ACM: CSV 아님: <!DOCTYPE html><html><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"></head><body><noscript>T
+- 미국 J: CSV 아님: <!DOCTYPE html><html><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"></head><body><noscript>T
+- 미국 VMC: CSV 아님: <!DOCTYPE html><html><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"></head><body><noscript>T
+- 미국 DHI: CSV 아님: <!DOCTYPE html><html><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"></head><body><noscript>T
