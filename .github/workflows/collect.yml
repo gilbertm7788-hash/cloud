@@ -2,9 +2,9 @@ name: collect
 
 on:
   schedule:
+    # 하루 1회, 아침에만. 알림이 종일 흩어지지 않게 한 번에 모아 보낸다.
+    # 활성 소스 전부가 slots에 morning을 포함하므로 이 한 번으로 다 수집된다.
     - cron: "30 22 * * *"   # 07:30 KST → morning
-    - cron: "0 3 * * *"     # 12:00 KST → noon
-    - cron: "30 9 * * *"    # 18:30 KST → evening
   workflow_dispatch:
     inputs:
       command:
@@ -72,8 +72,6 @@ jobs:
             # cron 지연으로 슬롯이 밀려 판정되지 않게, 발화한 cron에서 슬롯을 고정
             case "$CRON_EXPR" in
               "30 22 * * *") ARGS="$ARGS --slot morning" ;;
-              "0 3 * * *")   ARGS="$ARGS --slot noon" ;;
-              "30 9 * * *")  ARGS="$ARGS --slot evening" ;;
             esac
             [ -n "$INPUT_SOURCES" ] && ARGS="$ARGS --sources $INPUT_SOURCES"
             [ "$INPUT_DRY_RUN" = "true" ] && ARGS="$ARGS --dry-run"

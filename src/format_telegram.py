@@ -40,11 +40,9 @@ def format_item(item: Item, site_url: str = "") -> str:
     if info_bits:
         lines.append(" | ".join(info_bits))
 
-    if item.summary:
-        summary = escape_html(item.summary.strip())
-        if len(summary) > 300:
-            summary = summary[:297] + "..."
-        lines.append(summary)
+    # 기사 요약(RSS description)은 싣지 않는다. 제목만으로 내용 파악이 되고,
+    # 본문 발췌를 공개 채널로 재전송하는 것은 제목·링크만 다루는 나머지 구조와
+    # 성격이 달라 저작권상 유일하게 남아 있던 회색지대였다 (docs/checklist.md 운영 원칙).
 
     link_label = {"bid": "공고 보기", "committee": "공고 보기", "youtube": "영상 보기"}.get(
         item.category, "원문 보기"

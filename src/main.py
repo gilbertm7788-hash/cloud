@@ -29,6 +29,9 @@ from .telegram_client import TelegramClient, TelegramError
 log = logging.getLogger("pipeline")
 KST = timezone(timedelta(hours=9))
 BOOTSTRAP_POST_LIMIT = 3
+# 일간 산출물(브리핑 글·블로그 초안·LLM 요약)을 만드는 슬롯.
+# cron이 아침 1회뿐이라 morning이 그날의 유일한 실행이다.
+DAILY_SLOT = "morning"
 
 
 def current_slot(now: datetime | None = None) -> str:
@@ -239,13 +242,14 @@ def run_collect(args: argparse.Namespace) -> int:
         alerts = update_health(health_results)
         for sid in alerts:
             _notify(cfg, tg, f"소스 '{sid}' 3회 연속 실패/0건 — 게시판 구조 변경 여부 확인 필요")
-        # 사이트는 매 run 재생성 (LLM 요약은 evening에만 — 비용 절제)
+        # 사이트는 매 run 재생성. LLM 요약·일간 브리핑·블로그 초안은
+        # 하루 한 번뿐인 DAILY_SLOT 실행에만 붙인다
         try:
-            build_site(store, cfg.site, use_llm=(slot == "evening"))
+            build_site(store, cfg.site, use_llm=(slot == DAILY_SLOT))
         except Exception as exc:  # noqa: BLE001
             log.exception("사이트 빌드 실패")
             errors.append(redact_secrets(f"site_build: {exc}", cfg.secrets.values()))
-        if slot == "evening":
+        if slot == DAILY_SLOT:
             try:
                 day = datetime.now(KST).date()
                 content = build_draft(store, day, use_llm=True, site_url=cfg.site.base_url)
