@@ -1,89 +1,16 @@
-"""텔레그램 메시지 포맷팅 (HTML, 4096자 분할, 링크 프리뷰)."""
+"""텔레그램 메시지 포맷팅 — 하루치를 한 통으로 묶는 일간 다이제스트."""
 from __future__ import annotations
 
-import re
+from .models import Item
 
-from .models import CATEGORY_META, Item
-
-TG_LIMIT = 4096
+TG_LIMIT = 4096  # 텔레그램 메시지 한도 (참고용, 실제 경계는 SAFE_LIMIT)
 SAFE_LIMIT = 4000  # 여유분
-
-_PARTIAL_ENTITY_RE = re.compile(r"&[a-zA-Z#0-9]{0,8}$")
 
 
 def escape_html(s: str) -> str:
     """텔레그램 HTML 규칙 + href 속성 안전을 위한 따옴표 이스케이프."""
     return (s.replace("&", "&amp;").replace("<", "&lt;")
             .replace(">", "&gt;").replace('"', "&quot;"))
-
-
-def _meta(category: str) -> dict[str, str]:
-    return CATEGORY_META.get(category, {"emoji": "🔔", "label": category, "hashtag": ""})
-
-
-def format_item(item: Item, site_url: str = "") -> str:
-    """카테고리별 템플릿. 블록(줄) 리스트를 조립해 태그 절단이 불가능한 구조로 생성."""
-    m = _meta(item.category)
-    title = escape_html(item.title.strip())
-    lines: list[str] = [f"{m['emoji']} [{m['label']}] <b>{title}</b>"]
-
-    info_bits: list[str] = []
-    org = item.extra.get("org") or item.author
-    if org:
-        info_bits.append(escape_html(str(org)))
-    deadline = item.extra.get("deadline")
-    if deadline:
-        info_bits.append(f"마감 {escape_html(str(deadline))}")
-    amount = item.extra.get("amount")
-    if amount:
-        info_bits.append(f"추정 {escape_html(str(amount))}")
-    if info_bits:
-        lines.append(" | ".join(info_bits))
-
-    # 기사 요약(RSS description)은 싣지 않는다. 제목만으로 내용 파악이 되고,
-    # 본문 발췌를 공개 채널로 재전송하는 것은 제목·링크만 다루는 나머지 구조와
-    # 성격이 달라 저작권상 유일하게 남아 있던 회색지대였다 (docs/checklist.md 운영 원칙).
-
-    link_label = {"bid": "공고 보기", "committee": "공고 보기", "youtube": "영상 보기"}.get(
-        item.category, "원문 보기"
-    )
-    link_line = f'<a href="{escape_html(item.url)}">{link_label}</a>'
-    lines.append(link_line)
-
-    tags = [m["hashtag"]] if m["hashtag"] else []
-    if site_url:
-        tags.append(f'<a href="{escape_html(site_url)}">전체 공고·아카이브</a>')
-    if tags:
-        lines.append(" · ".join(tags))
-
-    text = "\n".join(lines)
-    if len(text) > SAFE_LIMIT:
-        # 단일 아이템이 한도를 넘는 극단 케이스: 제목·링크만 남기되 태그·엔티티는 절대 자르지 않음
-        budget = SAFE_LIMIT - len(link_line) - 100
-        if budget < 0:
-            # URL 자체가 한도를 넘는 병리적 케이스 — 링크를 앵커 없이 잘라 넣어
-            # MESSAGE_TOO_LONG(400)로 아이템이 영구 실패하는 것을 막는다
-            return escape_html(item.title.strip())[:200] + "\n" + escape_html(item.url)[:SAFE_LIMIT - 250]
-        short = _PARTIAL_ENTITY_RE.sub("", escape_html(item.title.strip())[:budget])
-        text = f"{m['emoji']} [{m['label']}] <b>{short}</b>\n{link_line}"
-    return text
-
-
-def format_digest(items: list[Item], title: str, site_url: str = "") -> list[str]:
-    """캡 초과분 묶음 게시: 제목+링크 목록. 4096자 경계에서 메시지 분할."""
-    blocks: list[str] = [f"<b>{escape_html(title)}</b>"]
-    for it in items:
-        t = it.title.strip()
-        if len(t) > 300:  # 단일 블록이 분할 한도를 넘지 않게 원문 단계에서 자름
-            t = t[:297] + "..."
-        url = it.url
-        if len(url) > 1500:  # 비정상적으로 긴 URL은 링크 없이 제목만 (한도 초과 방지)
-            blocks.append(f"· {escape_html(t)}")
-        else:
-            blocks.append(f'· <a href="{escape_html(url)}">{escape_html(t)}</a>')
-    if site_url:
-        blocks.append(f'<a href="{escape_html(site_url)}">전체 보기</a>')
-    return split_blocks(blocks)
 
 
 def split_blocks(blocks: list[str], limit: int = SAFE_LIMIT) -> list[str]:
@@ -104,10 +31,105 @@ def split_blocks(blocks: list[str], limit: int = SAFE_LIMIT) -> list[str]:
     return messages
 
 
-def link_preview_for(item: Item) -> dict | None:
-    """유튜브는 큰 썸네일 카드, 입찰·위원회는 프리뷰 끔, 뉴스는 기본."""
-    if item.category == "youtube":
-        return {"url": item.url, "prefer_large_media": True}
-    if item.category in ("bid", "committee"):
-        return {"is_disabled": True}
-    return None
+# ── 일간 다이제스트 ──────────────────────────────────────────────────────────
+# 하루 한 번, 수집분 전체를 한 통(필요 시 여러 통)으로 묶어 보낸다.
+# 건별 메시지는 하루 수십 통이 되어 검토가 불가능했다.
+
+WEEKDAYS = ("월", "화", "수", "목", "금", "토", "일")
+
+# 섹션 순서 = 독자 가치 순. 위원회 모집은 다른 데서 찾기 어려운 정보라 맨 앞.
+DIGEST_SECTIONS = (
+    ("committee", "👥 위원회 모집", None),
+    ("bid", "📋 입찰공고", 20),
+    ("gov", "🏢 정책", 10),
+    ("association", "🏛 협회 소식", 10),
+    ("news", "📰 뉴스", 30),
+    ("youtube", "🎬 영상", 5),
+)
+# 뉴스는 매체가 많아 한 매체가 지면을 독점하지 않게 제한
+PER_SOURCE_CAP = 5
+
+
+def _digest_meta_line(item: Item) -> str:
+    """항목 아래 붙는 부가 정보 한 줄. 없으면 빈 문자열."""
+    bits: list[str] = []
+    org = item.extra.get("org")
+    if org:
+        bits.append(escape_html(str(org)))
+    deadline = item.extra.get("deadline")
+    if deadline:
+        bits.append(f"마감 {escape_html(str(deadline))}")
+    amount = item.extra.get("amount")
+    if amount:
+        bits.append(f"추정 {escape_html(str(amount))}")
+    return " · ".join(bits)
+
+
+def _digest_entry(item: Item) -> list[str]:
+    title = escape_html(item.title.strip())
+    if len(title) > 200:
+        title = title[:197] + "..."
+    href = escape_html(item.url)
+    anchor = f'▶️ <a href="{href}">{title}</a>'
+    if len(anchor) > SAFE_LIMIT:
+        # URL 자체가 한도를 넘는 병리적 케이스 — 링크를 버리고 제목만 남긴다.
+        # 한 블록이 한도를 넘으면 split_blocks도 쪼갤 수 없어 전송이 400으로 죽는다.
+        anchor = f"▶️ {title}"
+    lines = [anchor]
+    meta = _digest_meta_line(item)
+    if meta:
+        lines.append(meta)
+    return lines
+
+
+def _group_by_source(items: list[Item]) -> dict[str, list[Item]]:
+    grouped: dict[str, list[Item]] = {}
+    for it in items:
+        grouped.setdefault(it.author or it.source_id, []).append(it)
+    return grouped
+
+
+def format_daily_digest(items: list[Item], day, site_url: str = "",
+                        title: str = "라벤더") -> list[str]:
+    """수집분을 섹션별로 묶은 일간 다이제스트. 4096자 경계에서 여러 통으로 나뉜다."""
+    date_str = f"{day.year}년 {day.month}월 {day.day}일"
+    header = f"<b>[{escape_html(title)}] {date_str} ({WEEKDAYS[day.weekday()]})</b>"
+    blocks: list[str] = [header]
+    total = 0
+
+    for category, label, cap in DIGEST_SECTIONS:
+        bucket = [it for it in items if (it.category or "news") == category]
+        if not bucket:
+            continue
+        shown, omitted = bucket, 0
+        if cap is not None and len(bucket) > cap:
+            shown, omitted = bucket[:cap], len(bucket) - cap
+
+        blocks.append("")
+        blocks.append(f"<b>{label}</b>")
+
+        if category == "news":
+            # 매체별로 묶어 출처가 드러나게 (『커버리지』식 그룹 헤더)
+            for source_name, group in _group_by_source(shown).items():
+                blocks.append("")
+                blocks.append(f"&lt;{escape_html(source_name)}&gt;")
+                for it in group[:PER_SOURCE_CAP]:
+                    blocks.extend(_digest_entry(it))
+                    total += 1
+                if len(group) > PER_SOURCE_CAP:
+                    omitted += len(group) - PER_SOURCE_CAP
+        else:
+            for it in shown:
+                blocks.extend(_digest_entry(it))
+                total += 1
+
+        if omitted:
+            blocks.append(f"…외 {omitted}건")
+
+    if total == 0:
+        return []
+
+    blocks.append("")
+    if site_url:
+        blocks.append(f'전체 공고·아카이브 → <a href="{escape_html(site_url)}">{escape_html(site_url)}</a>')
+    return split_blocks(blocks)

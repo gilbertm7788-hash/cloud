@@ -19,9 +19,9 @@ from .collectors import COLLECTORS, CollectError, RunContext
 from .collectors import narajangteo
 from .config import AppConfig, apply_keyword_filters, load_config
 from .dedup import SeenStore
-from .format_telegram import format_digest, format_item, link_preview_for
+from .format_telegram import format_daily_digest
 from .httpio import decode_body, fetch_bytes, redact_secrets
-from .models import CATEGORY_META, Item
+from .models import Item
 from .report import SourceResult, render_report, update_health, verify_sources, write_github_summary
 from .site_build import build_site
 from .telegram_client import TelegramClient, TelegramError
@@ -83,40 +83,6 @@ def _item_from_row(row: dict) -> Item:
     )
 
 
-def _is_transient(exc: TelegramError) -> bool:
-    """일시적 장애(레이트리밋·네트워크·서버오류)면 True — 이때만 재시도 루프를 중단한다."""
-    text = str(exc).lower()
-    return ("429" in text or "네트워크" in text or "timeout" in text
-            or "[50" in text or "재시도 소진" in text)
-
-
-def _retry_pending(store, tg: TelegramClient, staging_chat: str, site_url: str,
-                   errors: list[str]) -> int:
-    """이전 run에서 게시 실패한 아이템 재시도.
-
-    결정적 오류(잘못된 메시지 등)는 해당 건만 'failed'로 내려 큐가 막히지 않게 하고,
-    일시적 장애일 때만 루프를 멈춰 다음 run에 통째로 재시도한다.
-    """
-    sent = 0
-    for row in store.pending(limit=25):
-        item = _item_from_row(row)
-        if not item.title or not item.url:
-            # 복원 불가 row — 'posted'로 올리면 아카이브에 빈 항목이 실리므로 종료 상태로만 내림
-            store.mark_status(row["id"], "failed")
-            continue
-        try:
-            mid = tg.send_message(staging_chat, format_item(item, site_url),
-                                  link_preview_for(item))
-            store.mark_posted(row["id"], mid)
-            sent += 1
-        except TelegramError as exc:
-            errors.append(f"pending 재시도 실패({row['id']}): {exc}")
-            if _is_transient(exc):
-                break
-            store.mark_status(row["id"], "failed")  # 영구 실패 — 큐에서 제외
-    return sent
-
-
 def run_collect(args: argparse.Namespace) -> int:
     cfg = load_config()
     slot = args.slot or current_slot()
@@ -147,10 +113,10 @@ def run_collect(args: argparse.Namespace) -> int:
     health_results: list[SourceResult] = []
     posted_total = 0
     site_url = cfg.site.base_url
-
-    # 이전 run에서 게시 실패한 아이템부터 재시도
+    # 이번 실행에서 다이제스트에 실을 아이템 (직전 실행에서 못 보낸 pending 포함)
+    digest_items: list[Item] = []
     if posting and tg is not None:
-        posted_total += _retry_pending(store, tg, staging_chat, site_url, errors)
+        digest_items.extend(_item_from_row(r) for r in store.pending(limit=200))
 
     for source in sources:
         collector = COLLECTORS.get(source.type)
@@ -202,40 +168,35 @@ def run_collect(args: argparse.Namespace) -> int:
                 log.info("[dry-run] %s | %s", it.dedup_key, it.title)
             continue
 
-        # 수집된 아이템은 게시 성패와 무관하게 즉시 영속화 —
-        # to_post는 'pending'(실패 시 다음 run에서 재시도), overflow는 digest/사이트로만 노출
+        # 수집분은 게시 성패와 무관하게 즉시 영속화 —
+        # to_post는 'pending'(그날 다이제스트 대상), overflow는 사이트에만 노출
         for it in overflow:
             store.mark_seen(it, status="skipped" if not bootstrap else "seen")
         for it in to_post:
             store.mark_seen(it, status="pending" if posting else "seen")
+            if posting:
+                digest_items.append(it)
 
-        if posting and tg is not None:
-            if not bootstrap and overflow:
-                label = CATEGORY_META.get(source.category, {}).get("label", source.category)
-                msgs = format_digest(overflow, f"{source.name} 신규 {label} 모음", site_url)
-                last_mid = None
-                try:
-                    for msg in msgs:
-                        last_mid = tg.send_message(staging_chat, msg)
-                except TelegramError as exc:
-                    errors.append(f"{source.id} digest 게시 실패: {exc}")
-                else:  # 전 메시지 성공 시에만 posted로 승격
-                    for it in overflow:
-                        store.mark_posted(it.dedup_key, last_mid)
-            for it in to_post:
-                try:
-                    mid = tg.send_message(
-                        staging_chat,
-                        format_item(it, site_url),
-                        link_preview_for(it),
-                    )
-                    store.mark_posted(it.dedup_key, mid)
-                    posted_total += 1
-                except TelegramError as exc:
-                    errors.append(f"{source.id} 게시 실패: {exc}")
-                    if _is_transient(exc):
-                        break  # 일시적 장애 — pending으로 남겨 다음 run에서 재시도
-                    store.mark_status(it.dedup_key, "failed")
+    # 수집이 끝난 뒤 하루치를 한 통(필요 시 여러 통)으로 묶어 보낸다.
+    # 건별 전송은 하루 수십 통이 되어 검토가 불가능했다.
+    if posting and tg is not None and digest_items:
+        msgs = format_daily_digest(
+            digest_items, datetime.now(KST).date(), site_url, title=cfg.site.title
+        )
+        sent_all, last_mid = True, None
+        for msg in msgs:
+            try:
+                last_mid = tg.send_message(staging_chat, msg, {"is_disabled": True})
+            except TelegramError as exc:
+                # 일부만 보내고 실패하면 전체를 pending으로 남겨 다음 실행에서 다시 만든다.
+                # 이미 나간 메시지는 중복되지만, 누락보다 낫다.
+                errors.append(f"다이제스트 게시 실패: {exc}")
+                sent_all = False
+                break
+        if sent_all:
+            for it in digest_items:
+                store.mark_posted(it.dedup_key, last_mid)
+            posted_total = len(digest_items)
 
     if not args.dry_run:
         store.prune()  # 오래된 미게시 row 정리 (state/seen.db 무한 증가 방지)
