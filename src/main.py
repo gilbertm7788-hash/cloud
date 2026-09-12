@@ -313,6 +313,41 @@ def run_blog_draft(args: argparse.Namespace) -> int:
     return 0
 
 
+def _outbound_links(page_url: str, html: str) -> list[str]:
+    """페이지 밖(다른 호스트)으로 나가는 링크 + 첨부 링크를 앵커 텍스트와 함께.
+
+    협회 게시판은 원 기관 공고를 옮겨 싣는 경우가 많아, 상세 페이지 안에
+    원문 URL이 숨어 있다. 그 URL을 찾아 링크를 원 기관으로 돌리기 위한 진단.
+    """
+    from bs4 import BeautifulSoup
+    from urllib.parse import urljoin, urlsplit
+
+    host = urlsplit(page_url).netloc.lower().removeprefix("www.")
+    soup = BeautifulSoup(html, "html.parser")
+    found: list[str] = []
+    for a in soup.find_all("a"):
+        raw = (a.get("href") or "").strip()
+        click = (a.get("onclick") or "").strip()
+        cand = raw
+        if not cand.lower().startswith(("http://", "https://")):
+            m = re.search(r"""https?://[^'"\s)]+""", click)
+            cand = m.group(0) if m else ("" if not raw or raw.startswith(("#", "javascript:")) else urljoin(page_url, raw))
+        if not cand.lower().startswith(("http://", "https://")):
+            continue
+        other = urlsplit(cand).netloc.lower().removeprefix("www.")
+        attach = bool(re.search(r"download|file|attach|fileDown", cand, re.I))
+        if other == host and not attach:
+            continue
+        label = "첨부" if (other == host and attach) else "외부"
+        found.append(f"  [{label}] {cand}  | {a.get_text(' ', strip=True)[:60]}")
+    # 본문 텍스트에 그냥 적혀 있는 URL (링크가 아닌 경우)
+    body = re.sub(r"<[^>]+>", " ", html)
+    for m in dict.fromkeys(re.findall(r"https?://[^\s<>\"']+", body)):
+        if urlsplit(m).netloc.lower().removeprefix("www.") != host:
+            found.append(f"  [본문텍스트] {m}")
+    return list(dict.fromkeys(found))
+
+
 def _probe_url(url: str, cfg, out: list[str]) -> None:
     try:
         content, charset = fetch_bytes(url, timeout=30, verify_tls=False)
@@ -321,14 +356,19 @@ def _probe_url(url: str, cfg, out: list[str]) -> None:
         return
     text = decode_body(content, charset)
     out.append(f"OK — {len(content)} bytes, charset={charset}")
-    links = re.findall(r"""(?:href|src)=["']([^"']+)""", text, re.I)
+    links = re.findall(r"""(?:href|src)=["\']([^"\']+)""", text, re.I)
     feeds = [l for l in dict.fromkeys(links) if re.search(r"rss|feed|\.xml", l, re.I)]
     out.append("--- 피드/XML 링크 후보 ---")
     out += feeds[:40] or ["(없음)"]
+    out.append("--- 외부/첨부 링크 후보 (원문 출처 추적용) ---")
+    try:
+        out += _outbound_links(url, text)[:40] or ["(없음)"]
+    except Exception as exc:  # noqa: BLE001
+        out.append(f"(추출 실패: {exc})")
     out.append("--- 본문 텍스트 앞부분 ---")
-    out.append(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", text))[:2500])
+    out.append(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", text))[:6000])
     out.append("--- HTML 앞부분 ---")
-    out.append(text[:2500])
+    out.append(text[:3000])
 
 
 def _probe_source(source, cfg, out: list[str]) -> None:
